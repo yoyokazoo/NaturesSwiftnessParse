@@ -136,6 +136,8 @@ namespace NaturesSwiftnessParse
             var healRoot = JsonSerializer.Deserialize<HealEventRoot>(healJson, options);
             foreach (var heal in healRoot.Data.ReportData.Report.Events.Data)
             {
+                if (heal.Type != "heal") continue;
+
                 string sourceName = raidReport.GetActor(heal.SourceID.Value);
                 string targetName = raidReport.GetActor(heal.TargetID.Value);
                 int healAmount = heal.Extra["amount"].GetInt32();
@@ -143,8 +145,11 @@ namespace NaturesSwiftnessParse
                 bool critical = heal.Extra["hitType"].GetInt32() == 2; // 1 is normal, 2 is critical
                 string abilityName = raidReport.GetAbility(heal.AbilityGameID.Value);
                 var healEvent = new HealEvent(heal.Timestamp, healAmount, overheal, sourceName, targetName, abilityName, critical);
-                Console.WriteLine(healEvent);
+
+                raidReport.GetFight(heal.Fight.Value).AddHealEvent(healEvent);
             }
+
+            raidReport.GetFight(5).GetHealTimeline("Moodatude").Print();
 
             //var fightJson = await QueryForHPResourceEvents(reportIds.First(), 5);
             //var fightRoot = JsonSerializer.Deserialize<HpEventRoot>(fightJson, options);

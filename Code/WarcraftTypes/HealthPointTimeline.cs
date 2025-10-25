@@ -1,8 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace NaturesSwiftnessParse
 {
@@ -16,10 +13,10 @@ namespace NaturesSwiftnessParse
             Name = name;
             Events = new List<HealthPointEvent>();
 
+            // Assume the player starts at full health at the start of the fight
             Events.Add(new HealthPointEvent(0, 0, 100, Name));
         }
 
-        // Naively adds the event to the timeline
         public void AddEvent(HealthPointEvent hpe)
         {
             Events.Add(hpe);

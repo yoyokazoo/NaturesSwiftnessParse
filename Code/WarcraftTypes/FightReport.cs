@@ -6,15 +6,18 @@ namespace NaturesSwiftnessParse
     {
         public int Id { get; private set; }
         public string Name { get; private set; }
-        public Dictionary<string, HealthPointTimeline> Timelines { get; private set; }
+        public Dictionary<string, HealthPointTimeline> HealthPointTimelines { get; private set; }
+        public Dictionary<string, HealTimeline> HealTimelines { get; private set; }
 
         public FightReport(int id, string name)
         {
             Id = id;
             Name = name;
-            Timelines = new Dictionary<string, HealthPointTimeline>();
+            HealthPointTimelines = new Dictionary<string, HealthPointTimeline>();
+            HealTimelines = new Dictionary<string, HealTimeline>();
         }
 
+        // HealthPointTimelines
         public void AddHealthPointEvents(List<HealthPointEvent> healthPointEvents)
         {
             foreach (var healthPointEvent in healthPointEvents)
@@ -25,23 +28,47 @@ namespace NaturesSwiftnessParse
 
         public void AddHealthPointEvent(HealthPointEvent healthPointEvent)
         {
-            if (!Timelines.ContainsKey(healthPointEvent.Name))
+            if (!HealthPointTimelines.ContainsKey(healthPointEvent.Name))
             {
                 HealthPointTimeline newTimeline = new HealthPointTimeline(healthPointEvent.Name);
-                Timelines.Add(healthPointEvent.Name, newTimeline);
+                HealthPointTimelines.Add(healthPointEvent.Name, newTimeline);
             }
 
-            Timelines[healthPointEvent.Name].AddEvent(healthPointEvent);
-        }
-
-        public bool HasHealthpointTimeline(string name)
-        {
-            return Timelines.ContainsKey(name);
+            HealthPointTimelines[healthPointEvent.Name].AddEvent(healthPointEvent);
         }
 
         public HealthPointTimeline GetHealthPointTimeline(string name)
         {
-            return Timelines[name];
+            if (!HealthPointTimelines.ContainsKey(name)) return null;
+
+            return HealthPointTimelines[name];
+        }
+
+        // HealPointTimelines -- lots of duplication here
+        public void AddHealEvents(List<HealEvent> healEvents)
+        {
+            foreach (var healEvent in healEvents)
+            {
+                AddHealEvent(healEvent);
+            }
+        }
+
+        public void AddHealEvent(HealEvent healEvent)
+        {
+            if (!HealTimelines.ContainsKey(healEvent.CasterName))
+            {
+                HealTimeline newTimeline = new HealTimeline(healEvent.CasterName);
+                HealTimelines.Add(healEvent.CasterName, newTimeline);
+            }
+
+            HealTimelines[healEvent.CasterName].AddEvent(healEvent);
+        }
+
+        public HealTimeline GetHealTimeline(string name)
+        {
+            if (!HealTimelines.ContainsKey(name)) return null;
+
+            return HealTimelines[name];
         }
 
         public override string ToString()

@@ -87,6 +87,7 @@
     <Compile Include="Code\WarcraftTypes\HealEvent.cs" />
     <Compile Include="Code\WarcraftTypes\HealthPointEvent.cs" />
     <Compile Include="Code\WarcraftTypes\HealthPointTimeline.cs" />
+    <Compile Include="Code\WarcraftTypes\HealTimeline.cs" />
     <Compile Include="Code\WarcraftTypes\NaturesSwiftnessEvent.cs" />
     <Compile Include="Code\WarcraftTypes\RaidReport.cs" />
     <Compile Include="Form1.cs">

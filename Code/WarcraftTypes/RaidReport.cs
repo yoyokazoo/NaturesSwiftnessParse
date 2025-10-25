@@ -1,8 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace NaturesSwiftnessParse
 {
@@ -10,7 +8,7 @@ namespace NaturesSwiftnessParse
     {
         public string Id { get; set; }
         public string Name { get; set; }
-        public List<FightReport> Fights { get; set; }
+        public Dictionary<int, FightReport> Fights { get; set; }
         public List<NaturesSwiftnessEvent> NaturesSwiftnessEvents { get; set; }
         public Dictionary<int, string> ActorsById { get; set; }
         public Dictionary<int, string> AbilitiesById { get; set; }
@@ -19,7 +17,7 @@ namespace NaturesSwiftnessParse
         {
             Id = id;
             Name = name;
-            Fights = new List<FightReport>();
+            Fights = new Dictionary<int, FightReport>();
             NaturesSwiftnessEvents = new List<NaturesSwiftnessEvent>();
             ActorsById = new Dictionary<int, string>();
             AbilitiesById = new Dictionary<int, string>();
@@ -27,7 +25,14 @@ namespace NaturesSwiftnessParse
 
         public void AddFight(FightReport fight)
         {
-            Fights.Add(fight);
+            Fights.Add(fight.Id, fight);
+        }
+
+        public FightReport GetFight(int fightId)
+        {
+            if (!Fights.ContainsKey(fightId)) return null;
+
+            return Fights[fightId];
         }
 
         public void AddNaturesSwiftnessEvent(NaturesSwiftnessEvent nsEvent)
