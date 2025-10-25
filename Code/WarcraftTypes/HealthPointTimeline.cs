@@ -24,7 +24,24 @@ namespace NaturesSwiftnessParse
 
         public void SortByTime()
         {
-            Events.Sort((a, b) => a.Time.CompareTo(b.Time));
+            Events.Sort((a, b) =>
+            {
+                // Primary: sort by time (ascending)
+                int timeCompare = a.Time.CompareTo(b.Time);
+                if (timeCompare != 0)
+                    return timeCompare;
+
+                // Secondary: both positive damage (taking damage)
+                if (a.Damage > 0 && b.Damage > 0)
+                    return b.Percent.CompareTo(a.Percent); // higher % first
+
+                // Secondary: both negative damage (healing)
+                if (a.Damage < 0 && b.Damage < 0)
+                    return a.Percent.CompareTo(b.Percent); // lower % first
+
+                // Otherwise, keep stable ordering (equal timestamps, mixed sign)
+                return 0;
+            });
         }
 
         public void Print()

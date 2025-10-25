@@ -84,7 +84,7 @@ namespace NaturesSwiftnessParse
             var raidReport = new RaidReport(reportIds.First(), root.Data.ReportData.Report.Title);
             foreach(var fight in root.Data.ReportData.Report.Fights)
             {
-                var fightReport = new FightReport(fight.Id, fight.Name);
+                var fightReport = new FightReport(fight.Id, fight.Name, fight.StartTime, fight.EndTime);
                 raidReport.AddFight(fightReport);
             }
 
@@ -211,22 +211,34 @@ namespace NaturesSwiftnessParse
 
                 HealthPointEvent hpChangeBeforeNS = null;
                 HealthPointEvent hpChangeBeforeHeal = null;
-                for(int i = 0; i < healthPointTimeline.Events.Count; i++)
+                HealthPointEvent damageBeforeNS = null;
+                HealthPointEvent damageBeforeHeal = null;
+                for (int i = 0; i < healthPointTimeline.Events.Count; i++)
                 {
                     var hpChange = healthPointTimeline.Events[i];
                     if (hpChange.Time < nsEvent.Time)
                     {
                         hpChangeBeforeNS = healthPointTimeline.Events[i];
+                        if (hpChange.Damage > 0)
+                        {
+                            damageBeforeNS = healthPointTimeline.Events[i];
+                        }
                     }
 
                     if (hpChange.Time < nsEvent.HealEvent.Time)
                     {
                         hpChangeBeforeHeal = healthPointTimeline.Events[i];
+                        if (hpChange.Damage > 0)
+                        {
+                            damageBeforeHeal = healthPointTimeline.Events[i];
+                        }
                     }
                 }
 
-                nsEvent.AddNSHealthPointEvent(hpChangeBeforeNS);
-                nsEvent.AddHealHealthPointEvent(hpChangeBeforeHeal);
+                nsEvent.NSDamageEvent = damageBeforeNS;
+                nsEvent.NSHealthPointEvent = hpChangeBeforeNS;
+                nsEvent.HealDamageEvent = damageBeforeHeal;
+                nsEvent.HealHealthPointEvent = hpChangeBeforeHeal;
             }
 
             foreach (var nsEvent in raidReport.NaturesSwiftnessEvents)
@@ -525,6 +537,8 @@ namespace NaturesSwiftnessParse
                   fights {{
                     id
                     name
+                    startTime
+                    endTime
                   }}
                 }}
               }}

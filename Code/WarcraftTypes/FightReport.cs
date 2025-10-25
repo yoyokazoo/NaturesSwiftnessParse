@@ -6,15 +6,19 @@ namespace NaturesSwiftnessParse
     {
         public int Id { get; private set; }
         public string Name { get; private set; }
+        public int StartTime { get; private set; }
+        public int EndTime { get; private set; }
         public Dictionary<string, HealthPointTimeline> HealthPointTimelines { get; private set; }
         public Dictionary<string, HealTimeline> HealTimelines { get; private set; }
 
-        public FightReport(int id, string name)
+        public FightReport(int id, string name, int startTime, int endTime)
         {
             Id = id;
             Name = name;
             HealthPointTimelines = new Dictionary<string, HealthPointTimeline>();
             HealTimelines = new Dictionary<string, HealTimeline>();
+            StartTime = startTime;
+            EndTime = endTime;
         }
 
         // HealthPointTimelines

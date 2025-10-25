@@ -36,4 +36,10 @@ public class Fight
 
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("startTime")]
+    public int StartTime { get; set; } = 0;
+
+    [JsonPropertyName("endTime")]
+    public int EndTime { get; set; } = 0;
 }

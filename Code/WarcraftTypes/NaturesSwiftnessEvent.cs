@@ -8,8 +8,22 @@
 
         // expand to work with chain heal hitting multiple targets
         public HealEvent HealEvent { get; private set; }
-        public HealthPointEvent NSHealthPointEvent { get; private set; }
-        public HealthPointEvent HealHealthPointEvent { get; private set; }
+
+        // There are four damage events that we care about
+        // The most recent Damage the player took before the NS and the Heal
+        // and the most recent HP Value of the player before the NS and the Heal
+        // This helps us split out what event triggered the "oh shit I gotta NS" and
+        // what actually happened with the NS, since they may have gotten healed by someone else in the meantime
+
+        // Most recent damage before NS was cast
+        public HealthPointEvent NSDamageEvent { get; set; }
+        // Most recent hp before NS was cast
+        public HealthPointEvent NSHealthPointEvent { get; set; }
+
+        // Most recent damage before Heal was cast
+        public HealthPointEvent HealDamageEvent { get; set; }
+        // Most recent hp before Heal was cast
+        public HealthPointEvent HealHealthPointEvent { get; set; }
 
         public NaturesSwiftnessEvent(string name, long time, int fightId)
         {
@@ -18,7 +32,11 @@
             FightId = fightId;
 
             HealEvent = null;
+
+            NSDamageEvent = null;
             NSHealthPointEvent = null;
+
+            HealDamageEvent = null;
             HealHealthPointEvent = null;
         }
 
@@ -26,18 +44,6 @@
         public void AddHealEvent(HealEvent healEvent)
         {
             HealEvent = healEvent;
-        }
-
-        // HP Event right before the NS was cast
-        public void AddNSHealthPointEvent(HealthPointEvent healthPointEvent)
-        {
-            NSHealthPointEvent = healthPointEvent;
-        }
-
-        // HP Event right before the heal was cast
-        public void AddHealHealthPointEvent(HealthPointEvent healthPointEvent)
-        {
-            HealHealthPointEvent = healthPointEvent;
         }
 
         public override string ToString()
@@ -48,19 +54,31 @@
                 heal = $"{HealEvent.Time - Time} seconds later {HealEvent.HealName} cast on {HealEvent.TargetName} for {HealEvent.DamageHealed} ({HealEvent.Overheal} overheal)";
             }
 
+            string nsDamageEvent = "N/A";
+            if (NSDamageEvent != null)
+            {
+                nsDamageEvent = $"NS was cast {HealEvent?.Time - NSDamageEvent.Time}s after {NSDamageEvent.Name} dropped to {NSDamageEvent.Percent}%";
+            }
+
             string nsHpEvent = "N/A";
             if (NSHealthPointEvent != null)
             {
-                nsHpEvent = $"NS was cast {HealEvent?.Time - NSHealthPointEvent.Time}s after {NSHealthPointEvent.Name} dropped to {NSHealthPointEvent.Percent}%";
+                nsHpEvent = $"{NSHealthPointEvent.Name} was {NSHealthPointEvent.Percent}% when NS was cast";
+            }
+
+            string healDamageEvent = "N/A";
+            if (HealDamageEvent != null)
+            {
+                healDamageEvent = $"Heal was cast {HealEvent?.Time - HealDamageEvent.Time}s after {HealDamageEvent.Name} dropped to {HealDamageEvent.Percent}%";
             }
 
             string healHpEvent = "N/A";
-            if (HealHealthPointEvent != null)
+            if (NSHealthPointEvent != null)
             {
-                healHpEvent = $"Heal was cast {HealEvent?.Time - HealHealthPointEvent.Time}s after {HealHealthPointEvent.Name} dropped to {HealHealthPointEvent.Percent}%";
+                healHpEvent = $"{HealHealthPointEvent.Name} was {HealHealthPointEvent.Percent}% when heal was cast";
             }
 
-            return $"{CasterName} cast Nature's Swiftness at {Time}, {heal}. {nsHpEvent}. {healHpEvent}";
+            return $"{CasterName} cast Nature's Swiftness at {Time}, {heal}. {nsDamageEvent}. {nsHpEvent}. {healDamageEvent}. {healHpEvent}";
         }
     }
 }
