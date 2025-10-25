@@ -27,5 +27,15 @@
             string critical = CriticalHeal ? " (critical)" : string.Empty;
             return $"{CasterName} cast {HealName} on {TargetName} at {Time} for {DamageHealed}{overheal}{critical}";
         }
+
+        public int GetPreCriticalHealAmount()
+        {
+            if (CriticalHeal)
+            {
+                return (DamageHealed + Overheal) / 2;
+            }
+
+            return DamageHealed + Overheal;
+        }
     }
 }

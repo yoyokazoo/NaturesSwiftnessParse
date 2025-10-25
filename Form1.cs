@@ -149,43 +149,31 @@ namespace NaturesSwiftnessParse
                 raidReport.GetFight(heal.Fight.Value).AddHealEvent(healEvent);
             }
 
-            raidReport.GetFight(5).GetHealTimeline("Moodatude").Print();
+            foreach(var nsEvent in raidReport.NaturesSwiftnessEvents)
+            {
+                raidReport.GetFight(nsEvent.FightId).GetHealTimeline(nsEvent.CasterName).Print();
+            }
 
-            //var fightJson = await QueryForHPResourceEvents(reportIds.First(), 5);
-            //var fightRoot = JsonSerializer.Deserialize<HpEventRoot>(fightJson, options);
+            //raidReport.GetFight(5).GetHealTimeline("Moodatude").Print();
 
-            /*
-            // for now just use the first ID, later multiple report IDs can be jammed into the same report if we leave and come back
-            Console.WriteLine($"Running Report for {string.Join(",", reportIds)}");
-            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            foreach (var nsEvent in raidReport.NaturesSwiftnessEvents)
+            {
+                // Link the ns to the heal
+                FightReport fight = raidReport.GetFight(nsEvent.FightId);
+                HealTimeline healTimeline = fight.GetHealTimeline(nsEvent.CasterName);
+                foreach(HealEvent heal in healTimeline.Events)
+                {
+                    if (heal.Time < nsEvent.Time) continue;
 
-            var masterDataJson = await QueryForMasterDataActors(reportIds.First());
-            var masterDataRoot = JsonSerializer.Deserialize<MasterDataRoot>(masterDataJson, options);
+                    if (heal.Time >= nsEvent.Time)
+                    {
+                        nsEvent.AddHealEvent(heal);
+                        break;
+                    }
+                }
 
-            Console.WriteLine(masterDataJson);
-
-            var reportJson = await QueryForReport(reportIds.First());
-            var root = JsonSerializer.Deserialize<ReportDataRoot>(reportJson, options);
-
-            Console.WriteLine(reportJson);
-
-            int skeramId = 5;
-
-            var fightJson = await QueryForHPResourceEvents(reportIds.First(), skeramId.ToString());
-            var fightRoot = JsonSerializer.Deserialize<HpEventRoot>(fightJson, options);
-
-            Console.WriteLine(fightJson);
-
-            var healJson = await QueryForHealingEvents(reportIds.First(), skeramId.ToString());
-            var healRoot = JsonSerializer.Deserialize<HealEventRoot>(healJson, options);
-
-            Console.WriteLine(healJson);
-
-            var nsJson = await QueryForNaturesSwiftnessEvents(reportIds.First());
-            var nsRoot = JsonSerializer.Deserialize<NaturesSwiftnessRoot>(nsJson, options);
-
-            Console.WriteLine(nsJson);
-            */
+                Console.WriteLine(nsEvent);
+            }
         }
 
         /*

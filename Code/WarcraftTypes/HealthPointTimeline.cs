@@ -30,7 +30,7 @@ namespace NaturesSwiftnessParse
                 // Skip first event, starting at 100%
                 if (i == 0) continue;
 
-                Console.WriteLine(Events[i]);
+                Console.WriteLine($"\t{Events[i]}");
             }
         }
     }
