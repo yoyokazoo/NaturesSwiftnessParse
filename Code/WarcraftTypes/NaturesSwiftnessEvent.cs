@@ -8,28 +8,59 @@
 
         // expand to work with chain heal hitting multiple targets
         public HealEvent HealEvent { get; private set; }
+        public HealthPointEvent NSHealthPointEvent { get; private set; }
+        public HealthPointEvent HealHealthPointEvent { get; private set; }
 
         public NaturesSwiftnessEvent(string name, long time, int fightId)
         {
             CasterName = name;
             Time = time;
-            HealEvent = null;
             FightId = fightId;
+
+            HealEvent = null;
+            NSHealthPointEvent = null;
+            HealHealthPointEvent = null;
         }
 
+        // Heal cast after Nature's Swiftness
         public void AddHealEvent(HealEvent healEvent)
         {
             HealEvent = healEvent;
         }
 
+        // HP Event right before the NS was cast
+        public void AddNSHealthPointEvent(HealthPointEvent healthPointEvent)
+        {
+            NSHealthPointEvent = healthPointEvent;
+        }
+
+        // HP Event right before the heal was cast
+        public void AddHealHealthPointEvent(HealthPointEvent healthPointEvent)
+        {
+            HealHealthPointEvent = healthPointEvent;
+        }
+
         public override string ToString()
         {
-            string heal = "no subsequent heal cast.";
+            string heal = "no subsequent heal cast";
             if (HealEvent != null)
             {
                 heal = $"{HealEvent.Time - Time} seconds later {HealEvent.HealName} cast on {HealEvent.TargetName} for {HealEvent.DamageHealed} ({HealEvent.Overheal} overheal)";
             }
-            return $"{CasterName} cast Nature's Swiftness at {Time}, {heal}";
+
+            string nsHpEvent = "N/A";
+            if (NSHealthPointEvent != null)
+            {
+                nsHpEvent = $"NS was cast {HealEvent?.Time - NSHealthPointEvent.Time}s after {NSHealthPointEvent.Name} dropped to {NSHealthPointEvent.Percent}%";
+            }
+
+            string healHpEvent = "N/A";
+            if (HealHealthPointEvent != null)
+            {
+                healHpEvent = $"Heal was cast {HealEvent?.Time - HealHealthPointEvent.Time}s after {HealHealthPointEvent.Name} dropped to {HealHealthPointEvent.Percent}%";
+            }
+
+            return $"{CasterName} cast Nature's Swiftness at {Time}, {heal}. {nsHpEvent}. {healHpEvent}";
         }
     }
 }

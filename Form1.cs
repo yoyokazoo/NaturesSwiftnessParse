@@ -14,6 +14,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Text.Json;
 using NaturesSwiftnessParse.Properties;
+using System.Runtime.InteropServices;
 
 namespace NaturesSwiftnessParse
 {
@@ -35,6 +36,7 @@ namespace NaturesSwiftnessParse
 
             _ = RunNaturesSwiftnessReport(new List<string> { reportId });
 
+            //QueryForDamageTaken
 
             /*
             Raid afflickzTestRaid = new Raid("Afflickz test raid");
@@ -117,7 +119,7 @@ namespace NaturesSwiftnessParse
             raidReport.AddAbility(10396, "Healing Wave (Rank 9)");
             raidReport.AddAbility(25357, "Healing Wave (Rank 10)");
 
-            //raidReport.PrintActors();
+            raidReport.PrintActors();
 
             // Get Natures Swiftnesses for whole raid
             var nsJson = await QueryForNaturesSwiftnessEvents(reportIds.First(), new List<int> { 5 });
@@ -144,12 +146,41 @@ namespace NaturesSwiftnessParse
                 int overheal = heal.Extra.ContainsKey("overheal") ? heal.Extra["overheal"].GetInt32() : 0;
                 bool critical = heal.Extra["hitType"].GetInt32() == 2; // 1 is normal, 2 is critical
                 string abilityName = raidReport.GetAbility(heal.AbilityGameID.Value);
-                var healEvent = new HealEvent(heal.Timestamp, healAmount, overheal, sourceName, targetName, abilityName, critical);
 
+                var healEvent = new HealEvent(heal.Timestamp, healAmount, overheal, sourceName, targetName, abilityName, critical);
                 raidReport.GetFight(heal.Fight.Value).AddHealEvent(healEvent);
+
+                // Also log heal events as HP events if they're non-zero
+                if (healAmount > 0)
+                {
+                    HealthPointEvent hpEvent = new HealthPointEvent(heal.Timestamp, -1 * healAmount, heal.HitPoints.Value, targetName);
+                    raidReport.GetFight(heal.Fight.Value).AddHealthPointEvent(hpEvent);
+                }
             }
 
-            foreach(var nsEvent in raidReport.NaturesSwiftnessEvents)
+            // For each fight, grab the damage taken
+            var damageJson = await QueryForDamageTaken(reportIds.First(), 5);
+            var damageRoot = JsonSerializer.Deserialize<DamageTakenRoot>(damageJson, options);
+            foreach (var damageTaken in damageRoot.Data.ReportData.Report.Events.Data)
+            {
+                if (damageTaken.Amount == 0) continue;
+
+                string targetName = raidReport.GetActor(damageTaken.TargetID.Value);
+                //string actorName = raidReport.GetActor(hpChange.ResourceActor.Value);
+                int hpAmount = damageTaken.Amount.Value;
+                int hpPercent = damageTaken.HitPoints.Value;
+                HealthPointEvent hpEvent = new HealthPointEvent(damageTaken.Timestamp, hpAmount, hpPercent, targetName);
+                raidReport.GetFight(damageTaken.Fight.Value).AddHealthPointEvent(hpEvent);
+            }
+
+            // now that we've inserted both, sort the hp timelines
+            foreach (var hpTimeline in raidReport.GetFight(5).HealthPointTimelines.Values)
+            {
+                hpTimeline.SortByTime();
+                hpTimeline.Print();
+            }
+
+            foreach (var nsEvent in raidReport.NaturesSwiftnessEvents)
             {
                 raidReport.GetFight(nsEvent.FightId).GetHealTimeline(nsEvent.CasterName).Print();
             }
@@ -172,6 +203,34 @@ namespace NaturesSwiftnessParse
                     }
                 }
 
+                Console.WriteLine(nsEvent);
+
+                // Link the heal to the target's HP
+                HealthPointTimeline healthPointTimeline = fight.GetHealthPointTimeline(nsEvent.HealEvent.TargetName);
+                healthPointTimeline.Print();
+
+                HealthPointEvent hpChangeBeforeNS = null;
+                HealthPointEvent hpChangeBeforeHeal = null;
+                for(int i = 0; i < healthPointTimeline.Events.Count; i++)
+                {
+                    var hpChange = healthPointTimeline.Events[i];
+                    if (hpChange.Time < nsEvent.Time)
+                    {
+                        hpChangeBeforeNS = healthPointTimeline.Events[i];
+                    }
+
+                    if (hpChange.Time < nsEvent.HealEvent.Time)
+                    {
+                        hpChangeBeforeHeal = healthPointTimeline.Events[i];
+                    }
+                }
+
+                nsEvent.AddNSHealthPointEvent(hpChangeBeforeNS);
+                nsEvent.AddHealHealthPointEvent(hpChangeBeforeHeal);
+            }
+
+            foreach (var nsEvent in raidReport.NaturesSwiftnessEvents)
+            {
                 Console.WriteLine(nsEvent);
             }
         }
@@ -470,6 +529,30 @@ namespace NaturesSwiftnessParse
                 }}
               }}
             }}";
+
+            var payload = JsonSerializer.Serialize(new { query });
+
+            return await QueryWarcraftLogs(payload);
+        }
+
+        static async Task<string> QueryForDamageTaken(string reportId, int fightId)
+        {
+            var query = $@"
+            {{
+              reportData {{
+                report(code: ""{reportId}"") {{
+                  events(
+                    dataType: DamageTaken
+                    fightIDs: [{fightId}]
+                    includeResources: true
+                  ) {{
+                    data
+                    nextPageTimestamp
+                  }}
+                }}
+              }}
+            }}
+            ";
 
             var payload = JsonSerializer.Serialize(new { query });
 

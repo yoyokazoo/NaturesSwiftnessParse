@@ -5,8 +5,8 @@ namespace NaturesSwiftnessParse
 {
     public class HealthPointTimeline
     {
-        private string Name;
-        private List<HealthPointEvent> Events;
+        public string Name { get; private set; }
+        public List<HealthPointEvent> Events { get; private set; }
 
         public HealthPointTimeline(string name)
         {
@@ -20,6 +20,11 @@ namespace NaturesSwiftnessParse
         public void AddEvent(HealthPointEvent hpe)
         {
             Events.Add(hpe);
+        }
+
+        public void SortByTime()
+        {
+            Events.Sort((a, b) => a.Time.CompareTo(b.Time));
         }
 
         public void Print()
