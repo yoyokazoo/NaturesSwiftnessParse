@@ -13,6 +13,7 @@ namespace NaturesSwiftnessParse
         public List<FightReport> Fights { get; set; }
         public List<NaturesSwiftnessEvent> NaturesSwiftnessEvents { get; set; }
         public Dictionary<int, string> ActorsById { get; set; }
+        public Dictionary<int, string> AbilitiesById { get; set; }
 
         public RaidReport(string id, string name)
         {
@@ -21,6 +22,7 @@ namespace NaturesSwiftnessParse
             Fights = new List<FightReport>();
             NaturesSwiftnessEvents = new List<NaturesSwiftnessEvent>();
             ActorsById = new Dictionary<int, string>();
+            AbilitiesById = new Dictionary<int, string>();
         }
 
         public void AddFight(FightReport fight)
@@ -40,9 +42,21 @@ namespace NaturesSwiftnessParse
 
         public string GetActor(int id)
         {
-            if (!ActorsById.ContainsKey(id)) return string.Empty;
+            if (!ActorsById.ContainsKey(id)) return id.ToString();
             
             return ActorsById[id];
+        }
+
+        public void AddAbility(int id, string name)
+        {
+            AbilitiesById.Add(id, name);
+        }
+
+        public string GetAbility(int id)
+        {
+            if (!AbilitiesById.ContainsKey(id)) return id.ToString();
+
+            return AbilitiesById[id];
         }
 
         public void Print()

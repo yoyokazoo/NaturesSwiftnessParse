@@ -1,14 +1,8 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace NaturesSwiftnessParse
+﻿namespace NaturesSwiftnessParse
 {
     public class HealEvent
     {
-        public float Time { get; private set; }
+        public long Time { get; private set; }
         public int DamageHealed { get; private set; }
         public int Overheal { get; private set; }
         public string CasterName { get; private set; }
@@ -16,7 +10,7 @@ namespace NaturesSwiftnessParse
         public string HealName { get; private set; }
         public bool CriticalHeal { get; private set; }
 
-        public HealEvent(float time, int damageHealed, int overheal, string casterName, string targetName, string healName, bool criticalHeal)
+        public HealEvent(long time, int damageHealed, int overheal, string casterName, string targetName, string healName, bool criticalHeal)
         {
             Time = time;
             DamageHealed = damageHealed;

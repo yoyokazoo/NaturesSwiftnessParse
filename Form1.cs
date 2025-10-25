@@ -96,6 +96,27 @@ namespace NaturesSwiftnessParse
                 raidReport.AddActor(actor.Id, actor.Name);
             }
 
+            // These will be filled dynamically eventually, but for now...
+            raidReport.AddAbility(1064,  "Chain Heal (Rank 1)");
+            raidReport.AddAbility(10622, "Chain Heal (Rank 2)");
+            raidReport.AddAbility(10623, "Chain Heal (Rank 3)");
+            raidReport.AddAbility(8004, "Lesser Healing Wave (Rank 1)");
+            raidReport.AddAbility(8008, "Lesser Healing Wave (Rank 2)");
+            raidReport.AddAbility(8010, "Lesser Healing Wave (Rank 3)");
+            raidReport.AddAbility(10466, "Lesser Healing Wave (Rank 4)");
+            raidReport.AddAbility(10467, "Lesser Healing Wave (Rank 5)");
+            raidReport.AddAbility(10468, "Lesser Healing Wave (Rank 6)");
+            raidReport.AddAbility(331, "Healing Wave (Rank 1)");
+            raidReport.AddAbility(332, "Healing Wave (Rank 2)");
+            raidReport.AddAbility(547, "Healing Wave (Rank 3)");
+            raidReport.AddAbility(913, "Healing Wave (Rank 4)");
+            raidReport.AddAbility(939, "Healing Wave (Rank 5)");
+            raidReport.AddAbility(959, "Healing Wave (Rank 6)");
+            raidReport.AddAbility(8005, "Healing Wave (Rank 7)");
+            raidReport.AddAbility(10395, "Healing Wave (Rank 8)");
+            raidReport.AddAbility(10396, "Healing Wave (Rank 9)");
+            raidReport.AddAbility(25357, "Healing Wave (Rank 10)");
+
             //raidReport.PrintActors();
 
             // Get Natures Swiftnesses for whole raid
@@ -113,6 +134,17 @@ namespace NaturesSwiftnessParse
             // For each fight, grab the heal events
             var healJson = await QueryForHealingEvents(reportIds.First(), 5);
             var healRoot = JsonSerializer.Deserialize<HealEventRoot>(healJson, options);
+            foreach (var heal in healRoot.Data.ReportData.Report.Events.Data)
+            {
+                string sourceName = raidReport.GetActor(heal.SourceID.Value);
+                string targetName = raidReport.GetActor(heal.TargetID.Value);
+                int healAmount = heal.Extra["amount"].GetInt32();
+                int overheal = heal.Extra.ContainsKey("overheal") ? heal.Extra["overheal"].GetInt32() : 0;
+                bool critical = heal.Extra["hitType"].GetInt32() == 2; // 1 is normal, 2 is critical
+                string abilityName = raidReport.GetAbility(heal.AbilityGameID.Value);
+                var healEvent = new HealEvent(heal.Timestamp, healAmount, overheal, sourceName, targetName, abilityName, critical);
+                Console.WriteLine(healEvent);
+            }
 
             //var fightJson = await QueryForHPResourceEvents(reportIds.First(), 5);
             //var fightRoot = JsonSerializer.Deserialize<HpEventRoot>(fightJson, options);
