@@ -34,7 +34,7 @@ namespace NaturesSwiftnessParse
         {
             if (!HealthPointTimelines.ContainsKey(healthPointEvent.Name))
             {
-                HealthPointTimeline newTimeline = new HealthPointTimeline(healthPointEvent.Name);
+                HealthPointTimeline newTimeline = new HealthPointTimeline(healthPointEvent.Name, healthPointEvent.Id);
                 HealthPointTimelines.Add(healthPointEvent.Name, newTimeline);
             }
 

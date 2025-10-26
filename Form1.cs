@@ -34,7 +34,7 @@ namespace NaturesSwiftnessParse
                 return;
             }
 
-            _ = RunNaturesSwiftnessReport(new List<string> { reportId });
+            _ = RunNaturesSwiftnessReport(new List<string> { reportId }, debugFightId: null);
 
             //QueryForDamageTaken
 
@@ -72,7 +72,7 @@ namespace NaturesSwiftnessParse
             */
         }
 
-        static async Task RunNaturesSwiftnessReport(List<string> reportIds)
+        static async Task RunNaturesSwiftnessReport(List<string> reportIds, int? debugFightId)
         {
             Console.WriteLine($"Running Report for {string.Join(",", reportIds)}");
             var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
@@ -122,6 +122,10 @@ namespace NaturesSwiftnessParse
             //raidReport.PrintActors();
 
             var allFightIds = raidReport.Fights.Keys.ToList();
+            if (debugFightId.HasValue)
+            {
+                allFightIds = new List<int> { debugFightId.Value };
+            }
 
             // TODO: add debug option to only look at 1 fight, since otherwise it's real hard to parse by eyeball
 
@@ -140,44 +144,57 @@ namespace NaturesSwiftnessParse
             // For each fight, grab the heal events
             foreach(var fightId in allFightIds)
             {
-                var healJson = await QueryForHealingEvents(reportIds.First(), fightId);
-                var healRoot = JsonSerializer.Deserialize<HealEventRoot>(healJson, options);
-                foreach (var heal in healRoot.Data.ReportData.Report.Events.Data)
+                long nextPageTimestamp = 0;
+                var endTime = raidReport.GetFight(fightId).EndTime;
+
+                do
                 {
-                    if (heal.Type != "heal") continue;
-
-                    string sourceName = raidReport.GetActor(heal.SourceID.Value);
-                    string targetName = raidReport.GetActor(heal.TargetID.Value);
-                    int healAmount = heal.Extra["amount"].GetInt32();
-                    int overheal = heal.Extra.ContainsKey("overheal") ? heal.Extra["overheal"].GetInt32() : 0;
-                    bool critical = heal.Extra["hitType"].GetInt32() == 2; // 1 is normal, 2 is critical
-                    string abilityName = raidReport.GetAbility(heal.AbilityGameID.Value);
-
-                    var healEvent = new HealEvent(heal.Timestamp, healAmount, overheal, sourceName, targetName, abilityName, critical);
-                    raidReport.GetFight(heal.Fight.Value).AddHealEvent(healEvent);
-
-                    // Also log heal events as HP events if they're non-zero
-                    if (healAmount > 0)
+                    var healJson = await QueryForHealingEvents(reportIds.First(), fightId, nextPageTimestamp, endTime);
+                    var healRoot = JsonSerializer.Deserialize<HealEventRoot>(healJson, options);
+                    foreach (var heal in healRoot.Data.ReportData.Report.Events.Data)
                     {
-                        HealthPointEvent hpEvent = new HealthPointEvent(heal.Timestamp, -1 * healAmount, heal.HitPoints.Value, targetName);
-                        raidReport.GetFight(heal.Fight.Value).AddHealthPointEvent(hpEvent);
+                        if (heal.Type != "heal") continue;
+
+                        string sourceName = raidReport.GetActor(heal.SourceID.Value);
+                        string targetName = raidReport.GetActor(heal.TargetID.Value);
+                        int healAmount = heal.Extra["amount"].GetInt32();
+                        int overheal = heal.Extra.ContainsKey("overheal") ? heal.Extra["overheal"].GetInt32() : 0;
+                        bool critical = heal.Extra["hitType"].GetInt32() == 2; // 1 is normal, 2 is critical
+                        string abilityName = raidReport.GetAbility(heal.AbilityGameID.Value);
+
+                        var healEvent = new HealEvent(heal.Timestamp, healAmount, overheal, sourceName, targetName, abilityName, critical);
+                        raidReport.GetFight(heal.Fight.Value).AddHealEvent(healEvent);
+
+                        // Also log heal events as HP events if they're non-zero
+                        if (healAmount > 0)
+                        {
+                            HealthPointEvent hpEvent = new HealthPointEvent(heal.Timestamp, -1 * healAmount, heal.HitPoints.Value, targetName, heal.TargetID.Value);
+                            raidReport.GetFight(heal.Fight.Value).AddHealthPointEvent(hpEvent);
+                        }
                     }
-                }
 
-                // For each fight, grab the damage taken
-                var damageJson = await QueryForDamageTaken(reportIds.First(), fightId);
-                var damageRoot = JsonSerializer.Deserialize<DamageTakenRoot>(damageJson, options);
-                foreach (var damageTaken in damageRoot.Data.ReportData.Report.Events.Data)
+                    nextPageTimestamp = healRoot.Data.ReportData.Report.Events.NextPageTimestamp ?? 0;
+                } while (nextPageTimestamp != 0);
+
+                do
                 {
-                    if (damageTaken.Amount == 0) continue;
+                    // For each fight, grab the damage taken
+                    var damageJson = await QueryForDamageTaken(reportIds.First(), fightId, nextPageTimestamp, endTime);
+                    var damageRoot = JsonSerializer.Deserialize<DamageTakenRoot>(damageJson, options);
+                    foreach (var damageTaken in damageRoot.Data.ReportData.Report.Events.Data)
+                    {
+                        if (damageTaken.Amount == 0) continue;
 
-                    string targetName = raidReport.GetActor(damageTaken.TargetID.Value);
-                    //string actorName = raidReport.GetActor(hpChange.ResourceActor.Value);
-                    int hpAmount = damageTaken.Amount.Value;
-                    int hpPercent = damageTaken.HitPoints.Value;
-                    HealthPointEvent hpEvent = new HealthPointEvent(damageTaken.Timestamp, hpAmount, hpPercent, targetName);
-                    raidReport.GetFight(damageTaken.Fight.Value).AddHealthPointEvent(hpEvent);
-                }
+                        string targetName = raidReport.GetActor(damageTaken.TargetID.Value);
+                        //string actorName = raidReport.GetActor(hpChange.ResourceActor.Value);
+                        int hpAmount = damageTaken.Amount.Value;
+                        int hpPercent = damageTaken.HitPoints.Value;
+                        HealthPointEvent hpEvent = new HealthPointEvent(damageTaken.Timestamp, hpAmount, hpPercent, targetName, damageTaken.TargetID.Value);
+                        raidReport.GetFight(damageTaken.Fight.Value).AddHealthPointEvent(hpEvent);
+                    }
+
+                    nextPageTimestamp = damageRoot.Data.ReportData.Report.Events.NextPageTimestamp ?? 0;
+                } while (nextPageTimestamp != 0);
 
                 // now that we've inserted both, sort the hp timelines
                 foreach (var hpTimeline in raidReport.GetFight(fightId).HealthPointTimelines.Values)
@@ -566,7 +583,7 @@ namespace NaturesSwiftnessParse
             return await QueryWarcraftLogs(payload);
         }
 
-        static async Task<string> QueryForDamageTaken(string reportId, int fightId)
+        static async Task<string> QueryForDamageTaken(string reportId, int fightId, long startTime, long endTime)
         {
             var query = $@"
             {{
@@ -576,6 +593,9 @@ namespace NaturesSwiftnessParse
                     dataType: DamageTaken
                     fightIDs: [{fightId}]
                     includeResources: true
+                    startTime: {startTime}
+                    endTime: {endTime}
+                    limit: 100
                   ) {{
                     data
                     nextPageTimestamp
@@ -615,7 +635,7 @@ namespace NaturesSwiftnessParse
             return await QueryWarcraftLogs(payload);
         }
 
-        static async Task<string> QueryForHealingEvents(string reportId, int fightId)
+        static async Task<string> QueryForHealingEvents(string reportId, int fightId, long startTime, long endTime)
         {
             var query = $@"
             {{
@@ -626,6 +646,9 @@ namespace NaturesSwiftnessParse
                     fightIDs: [{fightId}]
                     sourceClass: ""Shaman""
                     includeResources: true
+                    startTime: {startTime}
+                    endTime: {endTime}
+                    limit: 100
                   ) {{
                     data
                     nextPageTimestamp
@@ -695,6 +718,18 @@ namespace NaturesSwiftnessParse
         private void textBox1_TextChanged(object sender, EventArgs e)
         {
 
+        }
+
+        private void button2_Click(object sender, EventArgs e)
+        {
+            var reportId = textBox1.Text;
+            if (reportId == string.Empty)
+            {
+                Console.WriteLine("Fill in report Id");
+                return;
+            }
+
+            _ = RunNaturesSwiftnessReport(new List<string> { reportId }, 22);
         }
     }
 }

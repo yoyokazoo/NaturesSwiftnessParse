@@ -106,6 +106,40 @@ namespace NaturesSwiftnessParse
             {
                 Console.WriteLine($"\t{nsEvent}");
             }
+
+            // Now that we have the top nature's swiftness events, present them in a pleasing manner
+            const int NATURES_SWIFTNESS_EVENTS_TO_HIGHLIGHT = 5;
+            for(int i = 0; i < NATURES_SWIFTNESS_EVENTS_TO_HIGHLIGHT; i++)
+            {
+                var highlightEvent = criticalSwiftnessEvents[i];
+                var highlightFight = Fights[highlightEvent.FightId];
+
+                var healDelay = highlightEvent.HealEvent.Time - highlightEvent.NSDamageEvent.Time;
+                var healDelayString = FormatMilliseconds(healDelay);
+
+                var damageLink = $"https://vanilla.warcraftlogs.com/reports/{Id}?fight={highlightFight.Id}&type=resources&source={highlightEvent.HealHealthPointEvent.Id}&view=events";
+                var fightLink = $"https://vanilla.warcraftlogs.com/reports/{Id}?fight={highlightFight.Id}";
+
+                string highlightString = $"{highlightEvent.CasterName} NS'ed {highlightEvent.HealEvent.TargetName} {healDelayString} after they got [hit to {highlightEvent.HealHealthPointEvent.Percent}%]({damageLink}) during [{highlightFight.Name}]({fightLink})";
+
+                // Write method to find follow up Nature's Swiftnesses and call them out
+
+                Console.WriteLine(highlightString);
+            }
+        }
+
+        public static string FormatMilliseconds(long ms)
+        {
+            double seconds = ms / 1000.0;
+
+            // Format with 2 decimal places, then trim trailing zeros
+            string formatted = seconds.ToString("0.##");
+
+            // Drop leading zero if under 1 second (e.g., 0.55 → .55)
+            if (formatted.StartsWith("0"))
+                formatted = formatted.TrimStart('0');
+
+            return $"{formatted}s";
         }
     }
 

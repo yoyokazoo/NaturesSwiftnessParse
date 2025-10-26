@@ -6,15 +6,17 @@ namespace NaturesSwiftnessParse
     public class HealthPointTimeline
     {
         public string Name { get; private set; }
+        public int Id { get; private set; }
         public List<HealthPointEvent> Events { get; private set; }
 
-        public HealthPointTimeline(string name)
+        public HealthPointTimeline(string name, int id)
         {
             Name = name;
+            Id = id;
             Events = new List<HealthPointEvent>();
 
             // Assume the player starts at full health at the start of the fight
-            Events.Add(new HealthPointEvent(0, 0, 100, Name));
+            Events.Add(new HealthPointEvent(0, 0, 100, Name, Id));
         }
 
         public void AddEvent(HealthPointEvent hpe)
