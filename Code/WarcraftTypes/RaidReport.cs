@@ -95,5 +95,45 @@ namespace NaturesSwiftnessParse
                 Console.WriteLine($"\t{nsEvent}");
             }
         }
+
+        public void PrintMostCriticalNaturesSwiftnesses()
+        {
+            Console.WriteLine($"Most Critical Nature's Swiftnesses:");
+
+            List<NaturesSwiftnessEvent> criticalSwiftnessEvents = new List<NaturesSwiftnessEvent>(NaturesSwiftnessEvents);
+            NaturesSwiftnessEventSorter.SortByNSHealthPercent(criticalSwiftnessEvents);
+            foreach(var nsEvent in criticalSwiftnessEvents)
+            {
+                Console.WriteLine($"\t{nsEvent}");
+            }
+        }
+    }
+
+    public static class NaturesSwiftnessEventSorter
+    {
+        /// <summary>
+        /// Sorts the given list of Nature's Swiftness events in ascending order of
+        /// the player's HP% when NS was cast (lowest HP first).
+        /// Events without NSHealthPointEvent are sorted last.
+        /// </summary>
+        public static void SortByNSHealthPercent(List<NaturesSwiftnessEvent> events)
+        {
+            events.Sort((a, b) =>
+            {
+                // Handle null NSHealthPointEvent safely
+                bool aHasHp = a.NSHealthPointEvent != null;
+                bool bHasHp = b.NSHealthPointEvent != null;
+
+                if (!aHasHp && !bHasHp)
+                    return 0;
+                if (!aHasHp)
+                    return 1; // nulls last
+                if (!bHasHp)
+                    return -1;
+
+                // Compare by Percent (ascending = lowest HP first)
+                return a.NSHealthPointEvent.Percent.CompareTo(b.NSHealthPointEvent.Percent);
+            });
+        }
     }
 }

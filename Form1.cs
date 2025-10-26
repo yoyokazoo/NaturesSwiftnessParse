@@ -245,6 +245,8 @@ namespace NaturesSwiftnessParse
             {
                 Console.WriteLine(nsEvent);
             }
+
+            raidReport.PrintMostCriticalNaturesSwiftnesses();
         }
 
         /*
