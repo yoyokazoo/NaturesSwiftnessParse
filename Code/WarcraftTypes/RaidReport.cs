@@ -121,13 +121,7 @@ namespace NaturesSwiftnessParse
                 var damageLink = $"https://vanilla.warcraftlogs.com/reports/{Id}?fight={highlightFight.Id}&type=resources&source={highlightEvent.HealHealthPointEvent.Id}&view=events";
                 var fightLink = $"https://vanilla.warcraftlogs.com/reports/{Id}?fight={highlightFight.Id}";
 
-                string intermediateHealthPercentString = string.Empty;
-                if (highlightEvent.HealDamageEvent.Percent != highlightEvent.HealHealthPointEvent.Percent)
-                {
-                    intermediateHealthPercentString = $" (since healed to {highlightEvent.HealHealthPointEvent.Percent}%)";
-                }
-
-                string highlightString = $"{i+1}: {highlightEvent.CasterName} NS'ed {highlightEvent.HealEvent.TargetName} {healDelayString} after they got [hit to {highlightEvent.HealDamageEvent.Percent}%]({damageLink}){intermediateHealthPercentString} during [{highlightFight.Name}]({fightLink})";
+                string highlightString = $"{i+1}: {highlightEvent.CasterName} NS'ed {highlightEvent.HealEvent.TargetName} at {highlightEvent.HealHealthPointEvent.Percent}%, {healDelayString} after they got [hit to {highlightEvent.HealDamageEvent.Percent}%]({damageLink}) during [{highlightFight.Name}]({fightLink})";
 
                 // Write method to find follow up Nature's Swiftnesses and call them out
                 List<NaturesSwiftnessEvent> followUpNS = new List<NaturesSwiftnessEvent>();
@@ -136,7 +130,7 @@ namespace NaturesSwiftnessParse
                     var followUpTime = nsEvent.HealTime - highlightEvent.HealTime;
                     if (nsEvent.FightId == highlightFight.Id && 
                         nsEvent.HealEvent?.TargetName == highlightEvent.HealEvent?.TargetName &&
-                        followUpTime > 0 && followUpTime < 2000 &&
+                        followUpTime >= 0 && followUpTime < 2000 &&
                         nsEvent.CasterName != highlightEvent.CasterName)
                     {
                         followUpNS.Add(nsEvent);
@@ -144,7 +138,7 @@ namespace NaturesSwiftnessParse
                     }
                 }
 
-                var orderedFollowUpNS = followUpNS.OrderBy(ns => ns.Time).ToList();
+                var orderedFollowUpNS = followUpNS.OrderBy(ns => ns.HealTime).ToList();
                 Console.WriteLine(highlightString);
                 foreach (var nsEvent in orderedFollowUpNS)
                 {
@@ -160,8 +154,8 @@ namespace NaturesSwiftnessParse
         {
             double seconds = ms / 1000.0;
 
-            // Format with 2 decimal places, then trim trailing zeros
-            string formatted = seconds.ToString("0.##");
+            // Format with 3 decimal places, then trim trailing zeros
+            string formatted = seconds.ToString("0.###");
 
             // Drop leading zero if under 1 second (e.g., 0.55 → .55)
             if (formatted.StartsWith("0"))

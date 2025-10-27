@@ -2,6 +2,9 @@
 {
     public class NaturesSwiftnessEvent
     {
+        public const int SHAMAN_NS_ABILITY_ID = 16188;
+        public const int DRUID_NS_ABILITY_ID = 17116;
+
         public long Time { get; private set; }
         public string CasterName { get; private set; }
         public int FightId { get; private set; }

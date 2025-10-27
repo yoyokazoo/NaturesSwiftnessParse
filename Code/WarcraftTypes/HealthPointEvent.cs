@@ -17,6 +17,15 @@
             Id = id;
         }
 
+        // We don't yet have a way to get the player's starting health.  So if the first event added is a heal,
+        // they must have started lower than 100%, so let's just say 99%.
+        // TODO: This is horribly hacky, figure out why we don't get a starting health
+        public void SetSubOneHundredStartingHealth()
+        {
+            Damage = 1;
+            Percent = 99;
+        }
+
         public override string ToString()
         {
             var direction = Damage < 0 ? "up" : "down";

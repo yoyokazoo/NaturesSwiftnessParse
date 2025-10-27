@@ -9,8 +9,11 @@
         public string TargetName { get; private set; }
         public string HealName { get; private set; }
         public bool CriticalHeal { get; private set; }
+        public bool HotTick { get; private set; }
 
-        public HealEvent(long time, int damageHealed, int overheal, string casterName, string targetName, string healName, bool criticalHeal)
+        public string FriendlyName => $"{HealName}{(HotTick ? " (tick)" : string.Empty)}";
+
+        public HealEvent(long time, int damageHealed, int overheal, string casterName, string targetName, string healName, bool criticalHeal, bool hotTick)
         {
             Time = time;
             DamageHealed = damageHealed;
@@ -19,13 +22,14 @@
             TargetName = targetName;
             HealName = healName;
             CriticalHeal = criticalHeal;
+            HotTick = hotTick;
         }
 
         public override string ToString()
         {
             string overheal = Overheal > 0 ? $" ({Overheal} overheal)" : string.Empty;
             string critical = CriticalHeal ? " (critical)" : string.Empty;
-            return $"{CasterName} cast {HealName} on {TargetName} at {Time} for {DamageHealed}{overheal}{critical}";
+            return $"{CasterName} healed {TargetName} {DamageHealed}{overheal}{critical} with {FriendlyName} at {Time}";
         }
 
         public int GetPreCriticalHealAmount()

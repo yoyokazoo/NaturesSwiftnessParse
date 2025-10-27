@@ -21,6 +21,13 @@ namespace NaturesSwiftnessParse
 
         public void AddEvent(HealthPointEvent hpe)
         {
+            // We don't yet have a way to get the player's starting health.  So if the first event added is a heal,
+            // they must have started lower than 100%, so let's just say 99%.
+            if (Events.Count == 1 && hpe.Damage < 0)
+            {
+                Events[0].SetSubOneHundredStartingHealth();
+            }
+
             Events.Add(hpe);
         }
 

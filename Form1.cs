@@ -130,13 +130,17 @@ namespace NaturesSwiftnessParse
             // TODO: add debug option to only look at 1 fight, since otherwise it's real hard to parse by eyeball
 
             // Get Natures Swiftnesses for whole raid
-            var nsJson = await QueryForNaturesSwiftnessEvents(reportIds.First(), allFightIds);
-            var nsRoot = JsonSerializer.Deserialize<NaturesSwiftnessRoot>(nsJson, options);
-            foreach (var ns in nsRoot.Data.ReportData.Report.Events.Data)
+            List<int> naturesSwiftnessAbilityIDs = new List<int>{ NaturesSwiftnessEvent.SHAMAN_NS_ABILITY_ID, NaturesSwiftnessEvent.DRUID_NS_ABILITY_ID };
+            foreach (var abilityId in naturesSwiftnessAbilityIDs)
             {
-                var sourceName = raidReport.GetActor(ns.SourceID.Value);
-                var nsEvent = new NaturesSwiftnessEvent(sourceName, ns.Timestamp, ns.Fight.Value);
-                raidReport.AddNaturesSwiftnessEvent(nsEvent);
+                var nsJson = await QueryForAbilityCastEvents(reportIds.First(), allFightIds, abilityId);
+                var nsRoot = JsonSerializer.Deserialize<NaturesSwiftnessRoot>(nsJson, options);
+                foreach (var ns in nsRoot.Data.ReportData.Report.Events.Data)
+                {
+                    var sourceName = raidReport.GetActor(ns.SourceID.Value);
+                    var nsEvent = new NaturesSwiftnessEvent(sourceName, ns.Timestamp, ns.Fight.Value);
+                    raidReport.AddNaturesSwiftnessEvent(nsEvent);
+                }
             }
 
             //raidReport.PrintNaturesSwiftnessEvents();
@@ -153,16 +157,17 @@ namespace NaturesSwiftnessParse
                     var healRoot = JsonSerializer.Deserialize<HealEventRoot>(healJson, options);
                     foreach (var heal in healRoot.Data.ReportData.Report.Events.Data)
                     {
-                        if (heal.Type != "heal") continue;
+                        if (heal.Type != "heal") continue; // ignore absorbs from protection potions
 
                         string sourceName = raidReport.GetActor(heal.SourceID.Value);
                         string targetName = raidReport.GetActor(heal.TargetID.Value);
                         int healAmount = heal.Extra["amount"].GetInt32();
                         int overheal = heal.Extra.ContainsKey("overheal") ? heal.Extra["overheal"].GetInt32() : 0;
                         bool critical = heal.Extra["hitType"].GetInt32() == 2; // 1 is normal, 2 is critical
+                        bool hotTick = heal.Extra.ContainsKey("tick");
                         string abilityName = raidReport.GetAbility(heal.AbilityGameID.Value);
 
-                        var healEvent = new HealEvent(heal.Timestamp, healAmount, overheal, sourceName, targetName, abilityName, critical);
+                        var healEvent = new HealEvent(heal.Timestamp, healAmount, overheal, sourceName, targetName, abilityName, critical, hotTick);
                         raidReport.GetFight(heal.Fight.Value).AddHealEvent(healEvent);
 
                         // Also log heal events as HP events if they're non-zero
@@ -221,6 +226,7 @@ namespace NaturesSwiftnessParse
                 foreach(HealEvent heal in healTimeline.Events)
                 {
                     if (heal.Time < nsEvent.Time) continue;
+                    if (heal.HotTick) continue;
 
                     if (heal.Time >= nsEvent.Time)
                     {
@@ -617,7 +623,7 @@ namespace NaturesSwiftnessParse
             return await QueryWarcraftLogs(payload);
         }
 
-        static async Task<string> QueryForNaturesSwiftnessEvents(string reportId, List<int> fightIds)
+        static async Task<string> QueryForAbilityCastEvents(string reportId, List<int> fightIds, int abilityId)
         {
             string fightIdList = string.Join(",", fightIds);
             var query = $@"
@@ -626,7 +632,7 @@ namespace NaturesSwiftnessParse
                 report(code: ""{reportId}"") {{
                   events(
                     dataType: Casts
-                    abilityID: 16188
+                    abilityID: {abilityId}
                     fightIDs: [{fightIdList}]
                   ) {{
                     data
