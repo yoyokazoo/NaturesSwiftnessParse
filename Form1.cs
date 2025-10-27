@@ -239,6 +239,11 @@ namespace NaturesSwiftnessParse
 
                 // Link the heal to the target's HP
                 HealthPointTimeline healthPointTimeline = fight.GetHealthPointTimeline(nsEvent.HealEvent.TargetName);
+                if (healthPointTimeline == null)
+                {
+                    Console.WriteLine($"null healthPointTimeline for fight {fight.Id} for {nsEvent.HealEvent.TargetName}, might be worth looking into");
+                    continue;
+                }
                 healthPointTimeline.Print();
 
                 HealthPointEvent hpChangeBeforeNS = null;
@@ -250,25 +255,26 @@ namespace NaturesSwiftnessParse
                     var hpChange = healthPointTimeline.Events[i];
                     if (hpChange.Time < nsEvent.Time)
                     {
-                        hpChangeBeforeNS = healthPointTimeline.Events[i];
+                        hpChangeBeforeNS = hpChange;
                         if (hpChange.Damage > 0)
                         {
-                            damageBeforeNS = healthPointTimeline.Events[i];
+                            damageBeforeNS = hpChange;
                         }
                     }
 
-                    if (hpChange.Time < nsEvent.HealEvent.Time)
+                    if (hpChange.Time < nsEvent.HealTime)
                     {
-                        hpChangeBeforeHeal = healthPointTimeline.Events[i];
+                        hpChangeBeforeHeal = hpChange;
                         if (hpChange.Damage > 0)
                         {
-                            damageBeforeHeal = healthPointTimeline.Events[i];
+                            damageBeforeHeal = hpChange;
                         }
                     }
                 }
 
                 nsEvent.NSDamageEvent = damageBeforeNS;
                 nsEvent.NSHealthPointEvent = hpChangeBeforeNS;
+
                 nsEvent.HealDamageEvent = damageBeforeHeal;
                 nsEvent.HealHealthPointEvent = hpChangeBeforeHeal;
             }
@@ -583,6 +589,7 @@ namespace NaturesSwiftnessParse
             return await QueryWarcraftLogs(payload);
         }
 
+        public const int DAMAGE_TAKEN_QUERY_LIMIT = 250;
         static async Task<string> QueryForDamageTaken(string reportId, int fightId, long startTime, long endTime)
         {
             var query = $@"
@@ -595,7 +602,7 @@ namespace NaturesSwiftnessParse
                     includeResources: true
                     startTime: {startTime}
                     endTime: {endTime}
-                    limit: 100
+                    limit: {DAMAGE_TAKEN_QUERY_LIMIT}
                   ) {{
                     data
                     nextPageTimestamp
@@ -635,6 +642,7 @@ namespace NaturesSwiftnessParse
             return await QueryWarcraftLogs(payload);
         }
 
+        public const int HEALING_EVENT_QUERY_LIMIT = 250;
         static async Task<string> QueryForHealingEvents(string reportId, int fightId, long startTime, long endTime)
         {
             var query = $@"
@@ -644,11 +652,10 @@ namespace NaturesSwiftnessParse
                   events(
                     dataType: Healing
                     fightIDs: [{fightId}]
-                    sourceClass: ""Shaman""
                     includeResources: true
                     startTime: {startTime}
                     endTime: {endTime}
-                    limit: 100
+                    limit: {HEALING_EVENT_QUERY_LIMIT}
                   ) {{
                     data
                     nextPageTimestamp
@@ -729,7 +736,9 @@ namespace NaturesSwiftnessParse
                 return;
             }
 
-            _ = RunNaturesSwiftnessReport(new List<string> { reportId }, 22);
+            var fightId = int.Parse(textBox2.Text);
+
+            _ = RunNaturesSwiftnessReport(new List<string> { reportId }, fightId);
         }
     }
 }

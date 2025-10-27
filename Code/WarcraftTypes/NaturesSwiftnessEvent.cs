@@ -25,6 +25,8 @@
         // Most recent hp before Heal was cast
         public HealthPointEvent HealHealthPointEvent { get; set; }
 
+        public long HealTime => HealEvent?.Time ?? 0;
+
         public NaturesSwiftnessEvent(string name, long time, int fightId)
         {
             CasterName = name;

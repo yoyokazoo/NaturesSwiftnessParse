@@ -101,7 +101,7 @@ namespace NaturesSwiftnessParse
             Console.WriteLine($"Most Critical Nature's Swiftnesses:");
 
             List<NaturesSwiftnessEvent> criticalSwiftnessEvents = new List<NaturesSwiftnessEvent>(NaturesSwiftnessEvents);
-            NaturesSwiftnessEventSorter.SortByNSHealthPercent(criticalSwiftnessEvents);
+            NaturesSwiftnessEventSorter.SortByHealHealthPercent(criticalSwiftnessEvents);
             foreach(var nsEvent in criticalSwiftnessEvents)
             {
                 Console.WriteLine($"\t{nsEvent}");
@@ -109,7 +109,8 @@ namespace NaturesSwiftnessParse
 
             // Now that we have the top nature's swiftness events, present them in a pleasing manner
             const int NATURES_SWIFTNESS_EVENTS_TO_HIGHLIGHT = 5;
-            for(int i = 0; i < NATURES_SWIFTNESS_EVENTS_TO_HIGHLIGHT; i++)
+            Console.WriteLine($"Top {NATURES_SWIFTNESS_EVENTS_TO_HIGHLIGHT} Nature's Swiftnesses of {Name}\n");
+            for(int i = 0; i < NATURES_SWIFTNESS_EVENTS_TO_HIGHLIGHT && i < criticalSwiftnessEvents.Count; i++)
             {
                 var highlightEvent = criticalSwiftnessEvents[i];
                 var highlightFight = Fights[highlightEvent.FightId];
@@ -120,12 +121,39 @@ namespace NaturesSwiftnessParse
                 var damageLink = $"https://vanilla.warcraftlogs.com/reports/{Id}?fight={highlightFight.Id}&type=resources&source={highlightEvent.HealHealthPointEvent.Id}&view=events";
                 var fightLink = $"https://vanilla.warcraftlogs.com/reports/{Id}?fight={highlightFight.Id}";
 
-                string highlightString = $"{highlightEvent.CasterName} NS'ed {highlightEvent.HealEvent.TargetName} {healDelayString} after they got [hit to {highlightEvent.HealHealthPointEvent.Percent}%]({damageLink}) during [{highlightFight.Name}]({fightLink})";
+                string intermediateHealthPercentString = string.Empty;
+                if (highlightEvent.HealDamageEvent.Percent != highlightEvent.HealHealthPointEvent.Percent)
+                {
+                    intermediateHealthPercentString = $" (since healed to {highlightEvent.HealHealthPointEvent.Percent}%)";
+                }
+
+                string highlightString = $"{i+1}: {highlightEvent.CasterName} NS'ed {highlightEvent.HealEvent.TargetName} {healDelayString} after they got [hit to {highlightEvent.HealDamageEvent.Percent}%]({damageLink}){intermediateHealthPercentString} during [{highlightFight.Name}]({fightLink})";
 
                 // Write method to find follow up Nature's Swiftnesses and call them out
+                List<NaturesSwiftnessEvent> followUpNS = new List<NaturesSwiftnessEvent>();
+                foreach(var nsEvent in NaturesSwiftnessEvents)
+                {
+                    var followUpTime = nsEvent.HealTime - highlightEvent.HealTime;
+                    if (nsEvent.FightId == highlightFight.Id && 
+                        nsEvent.HealEvent?.TargetName == highlightEvent.HealEvent?.TargetName &&
+                        followUpTime > 0 && followUpTime < 2000 &&
+                        nsEvent.CasterName != highlightEvent.CasterName)
+                    {
+                        followUpNS.Add(nsEvent);
+                        criticalSwiftnessEvents.Remove(nsEvent);
+                    }
+                }
 
+                var orderedFollowUpNS = followUpNS.OrderBy(ns => ns.Time).ToList();
                 Console.WriteLine(highlightString);
+                foreach (var nsEvent in orderedFollowUpNS)
+                {
+                    //Console.WriteLine($"\tFollow up {FormatMilliseconds(nsEvent.Time - highlightEvent.Time)} later: {nsEvent}");
+                    Console.WriteLine($"\t{nsEvent.CasterName} followed up with an NS {FormatMilliseconds(nsEvent.HealTime - highlightEvent.HealTime)} later, when {highlightEvent.HealEvent.TargetName} was at {nsEvent.HealHealthPointEvent.Percent}%");
+                }
             }
+
+            Console.WriteLine();
         }
 
         public static string FormatMilliseconds(long ms)
@@ -147,16 +175,16 @@ namespace NaturesSwiftnessParse
     {
         /// <summary>
         /// Sorts the given list of Nature's Swiftness events in ascending order of
-        /// the player's HP% when NS was cast (lowest HP first).
-        /// Events without NSHealthPointEvent are sorted last.
+        /// the player's HP% when the NS'ed heal was cast (lowest HP first).
+        /// Events without HealHealthPointEvent are sorted last.
         /// </summary>
-        public static void SortByNSHealthPercent(List<NaturesSwiftnessEvent> events)
+        public static void SortByHealHealthPercent(List<NaturesSwiftnessEvent> events)
         {
             events.Sort((a, b) =>
             {
-                // Handle null NSHealthPointEvent safely
-                bool aHasHp = a.NSHealthPointEvent != null;
-                bool bHasHp = b.NSHealthPointEvent != null;
+                // Handle null HealHealthPointEvent safely
+                bool aHasHp = a.HealHealthPointEvent != null;
+                bool bHasHp = b.HealHealthPointEvent != null;
 
                 if (!aHasHp && !bHasHp)
                     return 0;
@@ -166,7 +194,7 @@ namespace NaturesSwiftnessParse
                     return -1;
 
                 // Compare by Percent (ascending = lowest HP first)
-                return a.NSHealthPointEvent.Percent.CompareTo(b.NSHealthPointEvent.Percent);
+                return a.HealHealthPointEvent.Percent.CompareTo(b.HealHealthPointEvent.Percent);
             });
         }
     }
