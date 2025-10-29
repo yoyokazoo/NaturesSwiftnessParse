@@ -77,8 +77,9 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Code\GraphQLTypes\GraphQLReportData.cs" />
-    <Compile Include="Code\GraphQLTypes\WarcraftLogsClient.cs" />
+    <Compile Include="Code\WarcraftLogs\GraphQLReportData.cs" />
+    <Compile Include="Code\WarcraftLogsClient.cs" />
+    <Compile Include="Code\WarcraftLogs\WarcraftLogsQuery.cs" />
     <Compile Include="Code\WarcraftTypes\FightReport.cs" />
     <Compile Include="Code\WarcraftTypes\HealEvent.cs" />
     <Compile Include="Code\WarcraftTypes\HealthPointEvent.cs" />

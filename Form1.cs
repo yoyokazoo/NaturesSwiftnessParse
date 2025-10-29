@@ -78,7 +78,7 @@ namespace NaturesSwiftnessParse
             var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 
             // Get overarching report with fights
-            var reportJson = await QueryForReport(reportIds.First());
+            var reportJson = await WarcraftLogsQuery.QueryForReport(reportIds.First());
             var root = JsonSerializer.Deserialize<ReportDataRoot>(reportJson, options);
 
             var raidReport = new RaidReport(reportIds.First(), root.Data.ReportData.Report.Title);
@@ -91,7 +91,7 @@ namespace NaturesSwiftnessParse
             //raidReport.PrintFights();
 
             // Get master actors
-            var masterDataJson = await QueryForMasterDataActors(reportIds.First());
+            var masterDataJson = await WarcraftLogsQuery.QueryForMasterDataActors(reportIds.First());
             var masterDataRoot = JsonSerializer.Deserialize<ReportDataRoot>(masterDataJson, options);
             foreach(var actor in masterDataRoot.Data.ReportData.Report.MasterData.Actors)
             {
@@ -133,7 +133,7 @@ namespace NaturesSwiftnessParse
             List<int> naturesSwiftnessAbilityIDs = new List<int>{ NaturesSwiftnessEvent.SHAMAN_NS_ABILITY_ID, NaturesSwiftnessEvent.DRUID_NS_ABILITY_ID };
             foreach (var abilityId in naturesSwiftnessAbilityIDs)
             {
-                var nsJson = await QueryForAbilityCastEvents(reportIds.First(), allFightIds, abilityId);
+                var nsJson = await WarcraftLogsQuery.QueryForAbilityCastEvents(reportIds.First(), allFightIds, abilityId);
                 var nsRoot = JsonSerializer.Deserialize<ReportDataRoot>(nsJson, options);
                 foreach (var ns in nsRoot.Data.ReportData.Report.Events.Data)
                 {
@@ -153,7 +153,7 @@ namespace NaturesSwiftnessParse
 
                 do
                 {
-                    var healJson = await QueryForHealingEvents(reportIds.First(), fightId, nextPageTimestamp, endTime);
+                    var healJson = await WarcraftLogsQuery.QueryForHealingEvents(reportIds.First(), fightId, nextPageTimestamp, endTime);
                     var healRoot = JsonSerializer.Deserialize<ReportDataRoot>(healJson, options);
                     foreach (var heal in healRoot.Data.ReportData.Report.Events.Data)
                     {
@@ -184,7 +184,7 @@ namespace NaturesSwiftnessParse
                 do
                 {
                     // For each fight, grab the damage taken
-                    var damageJson = await QueryForDamageTaken(reportIds.First(), fightId, nextPageTimestamp, endTime);
+                    var damageJson = await WarcraftLogsQuery.QueryForDamageTaken(reportIds.First(), fightId, nextPageTimestamp, endTime);
                     var damageRoot = JsonSerializer.Deserialize<ReportDataRoot>(damageJson, options);
                     foreach (var damageTaken in damageRoot.Data.ReportData.Report.Events.Data)
                     {
@@ -541,191 +541,6 @@ namespace NaturesSwiftnessParse
                 targetName = targetField.Substring(arrowIndex + 1).Trim();
 
             return (success: true, time, hpRaw, hpPercent, targetName);
-        }
-
-        // from chat GPT
-        // 
-
-        
-
-        
-
-        static async Task<string> QueryForMasterDataActors(string reportId)
-        {
-            var query = $@"
-            {{
-              reportData {{
-                report(code: ""{reportId}"") {{
-                  masterData {{
-                        actors {{
-                          id
-                          name
-                          type
-                          petOwner
-                            }}
-                        }}
-                    }}
-                }}
-            }}";
-
-            var payload = JsonSerializer.Serialize(new { query });
-
-            return await QueryWarcraftLogs(payload);
-        }
-
-        static async Task<string> QueryForReport(string reportId)
-        {
-            var query = $@"
-            {{
-              reportData {{
-                report(code: ""{reportId}"") {{
-                  title
-                  fights {{
-                    id
-                    name
-                    startTime
-                    endTime
-                  }}
-                }}
-              }}
-            }}";
-
-            var payload = JsonSerializer.Serialize(new { query });
-
-            return await QueryWarcraftLogs(payload);
-        }
-
-        public const int DAMAGE_TAKEN_QUERY_LIMIT = 250;
-        static async Task<string> QueryForDamageTaken(string reportId, int fightId, long startTime, long endTime)
-        {
-            var query = $@"
-            {{
-              reportData {{
-                report(code: ""{reportId}"") {{
-                  events(
-                    dataType: DamageTaken
-                    fightIDs: [{fightId}]
-                    includeResources: true
-                    startTime: {startTime}
-                    endTime: {endTime}
-                    limit: {DAMAGE_TAKEN_QUERY_LIMIT}
-                  ) {{
-                    data
-                    nextPageTimestamp
-                  }}
-                }}
-              }}
-            }}
-            ";
-
-            var payload = JsonSerializer.Serialize(new { query });
-
-            return await QueryWarcraftLogs(payload);
-        }
-
-        static async Task<string> QueryForAbilityCastEvents(string reportId, List<int> fightIds, int abilityId)
-        {
-            string fightIdList = string.Join(",", fightIds);
-            var query = $@"
-            {{
-              reportData {{
-                report(code: ""{reportId}"") {{
-                  events(
-                    dataType: Casts
-                    abilityID: {abilityId}
-                    fightIDs: [{fightIdList}]
-                  ) {{
-                    data
-                    nextPageTimestamp
-                  }}
-                }}
-              }}
-            }}
-            ";
-
-            var payload = JsonSerializer.Serialize(new { query });
-
-            return await QueryWarcraftLogs(payload);
-        }
-
-        public const int HEALING_EVENT_QUERY_LIMIT = 250;
-        static async Task<string> QueryForHealingEvents(string reportId, int fightId, long startTime, long endTime)
-        {
-            var query = $@"
-            {{
-              reportData {{
-                report(code: ""{reportId}"") {{
-                  events(
-                    dataType: Healing
-                    fightIDs: [{fightId}]
-                    includeResources: true
-                    startTime: {startTime}
-                    endTime: {endTime}
-                    limit: {HEALING_EVENT_QUERY_LIMIT}
-                  ) {{
-                    data
-                    nextPageTimestamp
-                  }}
-                }}
-              }}
-            }}
-            ";
-
-            var payload = JsonSerializer.Serialize(new { query });
-
-            return await QueryWarcraftLogs(payload);
-        }
-
-        private static readonly HttpClient _client = new HttpClient();
-
-        static string OAuthToken = String.Empty;
-        static async Task<string> GetOauthToken()
-        {
-            if (OAuthToken == String.Empty)
-            {
-                using (StreamReader stream = new StreamReader($"{WarcraftLogsClient.NAME}"))
-                {
-                    WarcraftLogsClient fileReadResult = JsonSerializer.Deserialize<WarcraftLogsClient>(stream.ReadToEnd());
-
-                    OAuthToken = await GetAccessToken(
-                        clientId: fileReadResult.ClientId,
-                        clientSecret: fileReadResult.ClientSecret
-                    );
-                }
-            }
-
-            return OAuthToken;
-        }
-
-        static async Task<string> GetAccessToken(string clientId, string clientSecret)
-        {
-            var body = new StringContent(
-                $"grant_type=client_credentials&client_id={clientId}&client_secret={clientSecret}",
-                Encoding.UTF8,
-                "application/x-www-form-urlencoded"
-            );
-
-            var resp = await _client.PostAsync("https://www.warcraftlogs.com/oauth/token", body);
-            resp.EnsureSuccessStatusCode();
-            var json = await resp.Content.ReadAsStringAsync();
-
-            // Extract "access_token" from JSON
-            var token = System.Text.Json.JsonDocument.Parse(json)
-                .RootElement.GetProperty("access_token")
-                .GetString();
-
-            return token;
-        }
-
-        static async Task<string> QueryWarcraftLogs(string payload)
-        {
-            var token = await GetOauthToken();
-            var content = new StringContent(payload, Encoding.UTF8, "application/json");
-
-            _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            var resp = await _client.PostAsync("https://www.warcraftlogs.com/api/v2/client", content);
-            resp.EnsureSuccessStatusCode();
-            return await resp.Content.ReadAsStringAsync();
         }
 
         private void textBox1_TextChanged(object sender, EventArgs e)
