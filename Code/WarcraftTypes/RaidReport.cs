@@ -21,6 +21,7 @@ namespace NaturesSwiftnessParse
             NaturesSwiftnessEvents = new List<NaturesSwiftnessEvent>();
             ActorsById = new Dictionary<int, string>();
             AbilitiesById = new Dictionary<int, string>();
+            PopulateAbilities();
         }
 
         public void AddFight(FightReport fight)
@@ -148,6 +149,30 @@ namespace NaturesSwiftnessParse
             }
 
             Console.WriteLine();
+        }
+
+        public void PopulateAbilities()
+        {
+            // These will be filled dynamically eventually, but for now...
+            AddAbility(1064, "Chain Heal (Rank 1)");
+            AddAbility(10622, "Chain Heal (Rank 2)");
+            AddAbility(10623, "Chain Heal (Rank 3)");
+            AddAbility(8004, "Lesser Healing Wave (Rank 1)");
+            AddAbility(8008, "Lesser Healing Wave (Rank 2)");
+            AddAbility(8010, "Lesser Healing Wave (Rank 3)");
+            AddAbility(10466, "Lesser Healing Wave (Rank 4)");
+            AddAbility(10467, "Lesser Healing Wave (Rank 5)");
+            AddAbility(10468, "Lesser Healing Wave (Rank 6)");
+            AddAbility(331, "Healing Wave (Rank 1)");
+            AddAbility(332, "Healing Wave (Rank 2)");
+            AddAbility(547, "Healing Wave (Rank 3)");
+            AddAbility(913, "Healing Wave (Rank 4)");
+            AddAbility(939, "Healing Wave (Rank 5)");
+            AddAbility(959, "Healing Wave (Rank 6)");
+            AddAbility(8005, "Healing Wave (Rank 7)");
+            AddAbility(10395, "Healing Wave (Rank 8)");
+            AddAbility(10396, "Healing Wave (Rank 9)");
+            AddAbility(25357, "Healing Wave (Rank 10)");
         }
 
         public static string FormatMilliseconds(long ms)

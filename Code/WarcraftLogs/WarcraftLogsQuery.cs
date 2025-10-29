@@ -64,29 +64,6 @@ namespace NaturesSwiftnessParse
             return await resp.Content.ReadAsStringAsync();
         }
 
-        public static async Task<string> QueryForMasterDataActors(string reportId)
-        {
-            var query = $@"
-            {{
-              reportData {{
-                report(code: ""{reportId}"") {{
-                  masterData {{
-                        actors {{
-                          id
-                          name
-                          type
-                          petOwner
-                            }}
-                        }}
-                    }}
-                }}
-            }}";
-
-            var payload = JsonSerializer.Serialize(new { query });
-
-            return await QueryWarcraftLogs(payload);
-        }
-
         public static async Task<string> QueryForReport(string reportId)
         {
             var query = $@"
@@ -99,6 +76,14 @@ namespace NaturesSwiftnessParse
                     name
                     startTime
                     endTime
+                  }}
+                  masterData {{
+                    actors {{
+                      id
+                      name
+                      type
+                      petOwner
+                    }}
                   }}
                 }}
               }}
