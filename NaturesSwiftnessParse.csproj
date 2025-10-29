@@ -77,11 +77,6 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Code\GraphQLTypes\GraphQLDamageTakenData.cs" />
-    <Compile Include="Code\GraphQLTypes\GraphQLHealEventData.cs" />
-    <Compile Include="Code\GraphQLTypes\GraphQLHpEventData.cs" />
-    <Compile Include="Code\GraphQLTypes\GraphQLMasterActorData.cs" />
-    <Compile Include="Code\GraphQLTypes\GraphQLNaturesSwiftnessData.cs" />
     <Compile Include="Code\GraphQLTypes\GraphQLReportData.cs" />
     <Compile Include="Code\GraphQLTypes\WarcraftLogsClient.cs" />
     <Compile Include="Code\WarcraftTypes\FightReport.cs" />

@@ -92,7 +92,7 @@ namespace NaturesSwiftnessParse
 
             // Get master actors
             var masterDataJson = await QueryForMasterDataActors(reportIds.First());
-            var masterDataRoot = JsonSerializer.Deserialize<MasterDataRoot>(masterDataJson, options);
+            var masterDataRoot = JsonSerializer.Deserialize<ReportDataRoot>(masterDataJson, options);
             foreach(var actor in masterDataRoot.Data.ReportData.Report.MasterData.Actors)
             {
                 raidReport.AddActor(actor.Id, actor.Name);
@@ -134,7 +134,7 @@ namespace NaturesSwiftnessParse
             foreach (var abilityId in naturesSwiftnessAbilityIDs)
             {
                 var nsJson = await QueryForAbilityCastEvents(reportIds.First(), allFightIds, abilityId);
-                var nsRoot = JsonSerializer.Deserialize<NaturesSwiftnessRoot>(nsJson, options);
+                var nsRoot = JsonSerializer.Deserialize<ReportDataRoot>(nsJson, options);
                 foreach (var ns in nsRoot.Data.ReportData.Report.Events.Data)
                 {
                     var sourceName = raidReport.GetActor(ns.SourceID.Value);
@@ -154,14 +154,14 @@ namespace NaturesSwiftnessParse
                 do
                 {
                     var healJson = await QueryForHealingEvents(reportIds.First(), fightId, nextPageTimestamp, endTime);
-                    var healRoot = JsonSerializer.Deserialize<HealEventRoot>(healJson, options);
+                    var healRoot = JsonSerializer.Deserialize<ReportDataRoot>(healJson, options);
                     foreach (var heal in healRoot.Data.ReportData.Report.Events.Data)
                     {
                         if (heal.Type != "heal") continue; // ignore absorbs from protection potions
 
                         string sourceName = raidReport.GetActor(heal.SourceID.Value);
                         string targetName = raidReport.GetActor(heal.TargetID.Value);
-                        int healAmount = heal.Extra["amount"].GetInt32();
+                        int healAmount = heal.Amount.Value;
                         int overheal = heal.Extra.ContainsKey("overheal") ? heal.Extra["overheal"].GetInt32() : 0;
                         bool critical = heal.Extra["hitType"].GetInt32() == 2; // 1 is normal, 2 is critical
                         bool hotTick = heal.Extra.ContainsKey("tick");
@@ -185,7 +185,7 @@ namespace NaturesSwiftnessParse
                 {
                     // For each fight, grab the damage taken
                     var damageJson = await QueryForDamageTaken(reportIds.First(), fightId, nextPageTimestamp, endTime);
-                    var damageRoot = JsonSerializer.Deserialize<DamageTakenRoot>(damageJson, options);
+                    var damageRoot = JsonSerializer.Deserialize<ReportDataRoot>(damageJson, options);
                     foreach (var damageTaken in damageRoot.Data.ReportData.Report.Events.Data)
                     {
                         if (damageTaken.Amount == 0) continue;
