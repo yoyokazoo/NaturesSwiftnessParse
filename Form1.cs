@@ -28,30 +28,26 @@ namespace NaturesSwiftnessParse
 
         static async Task RunNaturesSwiftnessReport(List<string> reportIds, int? debugFightId)
         {
-            Console.WriteLine($"Running Report for {string.Join(",", reportIds)} (Only a single reportId is supported for now)");
-            //var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-            
             // TODO: take and handle multiple IDs in case we have split raids that we want a single report for
             string reportId = reportIds.First();
+            Console.WriteLine($"Running Report for {reportId} (Only a single reportId is supported for now)");
 
             // Get overarching report with fights and actors
             var reportJson = await WarcraftLogsQuery.QueryForReport(reportId);
-            var root = JsonSerializer.Deserialize<ReportDataRoot>(reportJson);
+            var reportDataRoot = JsonSerializer.Deserialize<ReportDataRoot>(reportJson);
 
-            var raidReport = new RaidReport(reportId, root.Data.ReportData.Report.Title);
-            foreach(var fight in root.Data.ReportData.Report.Fights)
+            var raidReport = new RaidReport(reportId, reportDataRoot.Data.ReportData.Report.Title);
+            foreach(var fight in reportDataRoot.Data.ReportData.Report.Fights)
             {
                 var fightReport = new FightReport(fight.Id, fight.Name, fight.StartTime, fight.EndTime);
                 raidReport.AddFight(fightReport);
             }
-            foreach (var actor in root.Data.ReportData.Report.MasterData.Actors)
+            foreach (var actor in reportDataRoot.Data.ReportData.Report.MasterData.Actors)
             {
                 raidReport.AddActor(actor.Id, actor.Name);
             }
 
-            //raidReport.PrintFights();
-            //raidReport.PrintActors();
-
+            // If we're debugging a single fight, only fetch that one
             var allFightIds = raidReport.Fights.Keys.ToList();
             if (debugFightId.HasValue)
             {
@@ -75,33 +71,20 @@ namespace NaturesSwiftnessParse
             //raidReport.PrintNaturesSwiftnessEvents();
 
             // For each fight, grab the heal events and damage events
-            foreach (var fightId in allFightIds)
-            {
-                var healRoots = await GetHealingEventsForFight(raidReport, reportId, fightId);
-                foreach (var healRoot in healRoots)
-                {
-                    ProcessHealingEvents(raidReport, healRoot);
-                }
+            var healRootResults = await GetHealingEvents(raidReport, reportId, allFightIds);
+            ProcessHealingEvents(raidReport, healRootResults);
 
-                var damageRoots = await GetDamageEventsForFight(raidReport, reportId, fightId);
-                foreach (var damageRoot in damageRoots)
-                {
-                    ProcessDamageEvents(raidReport, damageRoot);
-                }
-            }
+            var damageRootResults = await GetDamageEvents(raidReport, reportId, allFightIds);
+            ProcessDamageEvents(raidReport, damageRootResults);
 
             // now that we've inserted both, sort the hp timelines
             foreach (var fightId in allFightIds)
             {
-                
                 foreach (var hpTimeline in raidReport.GetFight(fightId).HealthPointTimelines.Values)
                 {
                     hpTimeline.SortByTime();
-                    //hpTimeline.Print();
                 }
             }
-
-            // asdf
 
             foreach (var nsEvent in raidReport.NaturesSwiftnessEvents)
             {
@@ -178,7 +161,18 @@ namespace NaturesSwiftnessParse
             raidReport.PrintMostCriticalNaturesSwiftnesses();
         }
 
-        private static void ProcessHealingEvents(RaidReport raidReport, ReportDataRoot healRoot)
+        private static void ProcessHealingEvents(RaidReport raidReport, List<ReportDataRoot>[] healRootResults)
+        {
+            foreach (var rootResult in healRootResults)
+            {
+                foreach (var root in rootResult)
+                {
+                    ProcessHealingEvent(raidReport, root);
+                }
+            }
+        }
+
+        private static void ProcessHealingEvent(RaidReport raidReport, ReportDataRoot healRoot)
         {
             foreach (var heal in healRoot.Data.ReportData.Report.Events.Data)
             {
@@ -204,7 +198,17 @@ namespace NaturesSwiftnessParse
             }
         }
 
-        private static void ProcessDamageEvents(RaidReport raidReport, ReportDataRoot damageRoot)
+        private static void ProcessDamageEvents(RaidReport raidReport, List<ReportDataRoot>[] damageRootResults)
+        {
+            foreach (var rootResult in damageRootResults)
+            {
+                foreach (var root in rootResult)
+                {
+                    ProcessDamageEvent(raidReport, root);
+                }
+            }
+        }
+        private static void ProcessDamageEvent(RaidReport raidReport, ReportDataRoot damageRoot)
         {
             foreach (var damageTaken in damageRoot.Data.ReportData.Report.Events.Data)
             {
@@ -217,6 +221,18 @@ namespace NaturesSwiftnessParse
                 HealthPointEvent hpEvent = new HealthPointEvent(damageTaken.Timestamp, hpAmount, hpPercent, targetName, damageTaken.TargetID.Value);
                 raidReport.GetFight(damageTaken.Fight.Value).AddHealthPointEvent(hpEvent);
             }
+        }
+
+        private static async Task<List<ReportDataRoot>[]> GetHealingEvents(RaidReport raidReport, string reportId, List<int> allFightIds)
+        {
+            List<Task<List<ReportDataRoot>>> healRoots = new List<Task<List<ReportDataRoot>>>();
+
+            foreach (var fightId in allFightIds)
+            {
+                healRoots.Add(GetHealingEventsForFight(raidReport, reportId, fightId));
+            }
+
+            return await Task.WhenAll(healRoots);
         }
 
         private static async Task<List<ReportDataRoot>> GetHealingEventsForFight(RaidReport raidReport, string reportId, int fightId)
@@ -235,6 +251,18 @@ namespace NaturesSwiftnessParse
             while (nextPageTimestamp != 0);
 
             return healRoots;
+        }
+
+        private static async Task<List<ReportDataRoot>[]> GetDamageEvents(RaidReport raidReport, string reportId, List<int> allFightIds)
+        {
+            List<Task<List<ReportDataRoot>>> damageRoots = new List<Task<List<ReportDataRoot>>>();
+
+            foreach (var fightId in allFightIds)
+            {
+                damageRoots.Add(GetDamageEventsForFight(raidReport, reportId, fightId));
+            }
+
+            return await Task.WhenAll(damageRoots);
         }
 
         private static async Task<List<ReportDataRoot>> GetDamageEventsForFight(RaidReport raidReport, string reportId, int fightId)
