@@ -151,6 +151,89 @@ namespace NaturesSwiftnessParse
             Console.WriteLine();
         }
 
+        public void SortHPTimelines()
+        {
+            foreach (var fightId in Fights.Keys)
+            {
+                foreach (var hpTimeline in GetFight(fightId).HealthPointTimelines.Values)
+                {
+                    hpTimeline.SortByTime();
+                }
+            }
+        }
+
+        public void LinkNaturesSwiftnessesAndHeals()
+        {
+            SortHPTimelines();
+
+            foreach (var nsEvent in NaturesSwiftnessEvents)
+            {
+                // Link the ns to the heal
+                FightReport fight = GetFight(nsEvent.FightId);
+                HealTimeline healTimeline = fight.GetHealTimeline(nsEvent.CasterName);
+                foreach (HealEvent heal in healTimeline.Events)
+                {
+                    if (heal.Time < nsEvent.Time) continue;
+                    if (heal.HotTick) continue;
+
+                    if (heal.Time >= nsEvent.Time)
+                    {
+                        nsEvent.AddHealEvent(heal);
+                        break;
+                    }
+                }
+
+                //Console.WriteLine(nsEvent);
+
+                if (nsEvent.HealEvent == null)
+                {
+                    Console.WriteLine($"After looking, never found HealEvent for {nsEvent}, might be worth looking into");
+                    continue;
+                }
+
+                // Link the heal to the target's HP
+                HealthPointTimeline healthPointTimeline = fight.GetHealthPointTimeline(nsEvent.HealEvent.TargetName);
+                if (healthPointTimeline == null)
+                {
+                    Console.WriteLine($"null healthPointTimeline for fight {fight.Id} for {nsEvent.HealEvent.TargetName}, might be worth looking into");
+                    continue;
+                }
+                healthPointTimeline.Print();
+
+                HealthPointEvent hpChangeBeforeNS = null;
+                HealthPointEvent hpChangeBeforeHeal = null;
+                HealthPointEvent damageBeforeNS = null;
+                HealthPointEvent damageBeforeHeal = null;
+                for (int i = 0; i < healthPointTimeline.Events.Count; i++)
+                {
+                    var hpChange = healthPointTimeline.Events[i];
+                    if (hpChange.Time < nsEvent.Time)
+                    {
+                        hpChangeBeforeNS = hpChange;
+                        if (hpChange.Damage > 0)
+                        {
+                            damageBeforeNS = hpChange;
+                        }
+                    }
+
+                    if (hpChange.Time < nsEvent.HealTime)
+                    {
+                        hpChangeBeforeHeal = hpChange;
+                        if (hpChange.Damage > 0)
+                        {
+                            damageBeforeHeal = hpChange;
+                        }
+                    }
+                }
+
+                nsEvent.NSDamageEvent = damageBeforeNS;
+                nsEvent.NSHealthPointEvent = hpChangeBeforeNS;
+
+                nsEvent.HealDamageEvent = damageBeforeHeal;
+                nsEvent.HealHealthPointEvent = hpChangeBeforeHeal;
+            }
+        }
+
         public void PopulateAbilities()
         {
             // These will be filled dynamically eventually, but for now...

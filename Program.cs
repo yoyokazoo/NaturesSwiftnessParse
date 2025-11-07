@@ -22,13 +22,13 @@ namespace NaturesSwiftnessParse
 
             var clientIdArg = new Option<string>(
                 name: "clientId",
-                description: "WarcraftLogs Client ID found at https://fresh.warcraftlogs.com/api/clients/. Also can be defined in WarcraftLogsClient.json."
+                description: $"WarcraftLogs Client ID found at {WarcraftLogsClient.CLIENT_URL}. Also can be defined in WarcraftLogsClient.json."
             )
             { Arity = ArgumentArity.ZeroOrOne };
 
             var clientSecretArg = new Option<string>(
                 name: "clientSecret",
-                description: "WarcraftLogs Client Secret found at https://fresh.warcraftlogs.com/api/clients/ when the client was created. Also can be defined in WarcraftLogsClient.json."
+                description: $"WarcraftLogs Client Secret found at {WarcraftLogsClient.CLIENT_URL} when the client was created. Also can be defined in WarcraftLogsClient.json."
             )
             { Arity = ArgumentArity.ZeroOrOne };
 
