@@ -20,6 +20,13 @@ namespace NaturesSwiftnessParse
             { Arity = ArgumentArity.ZeroOrOne };
             fightIdArg.SetDefaultValue(null);
 
+            var eventsToPrintArg = new Option<int>(
+                name: "eventsToPrint",
+                description: "Optional argument to choose how many NS events to print (default 5)"
+            )
+            { Arity = ArgumentArity.ZeroOrOne };
+            eventsToPrintArg.SetDefaultValue(5);
+
             var clientIdArg = new Option<string>(
                 name: "clientId",
                 description: $"WarcraftLogs Client ID found at {WarcraftLogsClient.CLIENT_URL}. Also can be defined in WarcraftLogsClient.json."
@@ -38,19 +45,21 @@ namespace NaturesSwiftnessParse
             var rootCommand = new RootCommand("Parses Nature's Swiftness usage from a Warcraft Logs report.");
             rootCommand.Add(reportIdArg);
             rootCommand.Add(fightIdArg);
+            rootCommand.Add(eventsToPrintArg);
             rootCommand.Add(clientIdArg);
             rootCommand.Add(clientSecretArg);
 
             // Handler
-            rootCommand.SetHandler(async (string reportId, int? fightId, string clientId, string clientSecret) =>
+            rootCommand.SetHandler(async (string reportId, int? fightId, int eventsToPrint, string clientId, string clientSecret) =>
             {
                 await NaturesSwiftnessParse.RunNaturesSwiftnessReport(
                     new List<string> { reportId },
                     fightId,
+                    eventsToPrint,
                     clientId,
                     clientSecret
                 );
-            }, reportIdArg, fightIdArg, clientIdArg, clientSecretArg);
+            }, reportIdArg, fightIdArg, eventsToPrintArg, clientIdArg, clientSecretArg);
 
             // Run
             return rootCommand.Invoke(args);

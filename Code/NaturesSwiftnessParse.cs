@@ -8,7 +8,7 @@ namespace NaturesSwiftnessParse
 {
     public static class NaturesSwiftnessParse
     {
-        public static async Task RunNaturesSwiftnessReport(List<string> reportIds, int? debugFightId, string clientId, string clientSecret)
+        public static async Task RunNaturesSwiftnessReport(List<string> reportIds, int? debugFightId, int eventsToPrint, string clientId, string clientSecret)
         {
             // TODO: take and handle multiple IDs in case we have split raids that we want a single report for
             string reportId = reportIds.First();
@@ -36,7 +36,7 @@ namespace NaturesSwiftnessParse
 
             raidReport.LinkNaturesSwiftnessesAndHeals();
 
-            raidReport.PrintMostCriticalNaturesSwiftnesses();
+            raidReport.PrintMostCriticalNaturesSwiftnesses(eventsToPrint);
         }
 
         private static void ProcessNaturesSwiftnessEvents(RaidReport raidReport, List<ReportDataRoot>[] nsRootResults)

@@ -97,7 +97,7 @@ namespace NaturesSwiftnessParse
             }
         }
 
-        public void PrintMostCriticalNaturesSwiftnesses()
+        public void PrintMostCriticalNaturesSwiftnesses(int eventCountToHighlight)
         {
             Console.WriteLine($"Most Critical Nature's Swiftnesses:");
 
@@ -109,9 +109,8 @@ namespace NaturesSwiftnessParse
             }
 
             // Now that we have the top nature's swiftness events, present them in a pleasing manner
-            const int NATURES_SWIFTNESS_EVENTS_TO_HIGHLIGHT = 5;
-            Console.WriteLine($"Top {NATURES_SWIFTNESS_EVENTS_TO_HIGHLIGHT} Nature's Swiftnesses of {Name}\n");
-            for(int i = 0; i < NATURES_SWIFTNESS_EVENTS_TO_HIGHLIGHT && i < criticalSwiftnessEvents.Count; i++)
+            Console.WriteLine($"Top {eventCountToHighlight} Nature's Swiftnesses of {Name}\n");
+            for(int i = 0; i < eventCountToHighlight && i < criticalSwiftnessEvents.Count; i++)
             {
                 var highlightEvent = criticalSwiftnessEvents[i];
                 var highlightFight = Fights[highlightEvent.FightId];
