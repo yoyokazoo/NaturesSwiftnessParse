@@ -1,9 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.CommandLine;
 using System.IO;
 using System.Linq;
-using System.Net.Http.Headers;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -15,25 +16,60 @@ namespace NaturesSwiftnessParse
         private static readonly HttpClient _client = new HttpClient();
 
         private static string OAuthToken = String.Empty;
+
+        private static string ClientId = null;
+        private static string ClientSecret = null;
+
+        public static void LoadClientIdAndSecret(string clientId, string clientSecret)
+        {
+            if (clientId != null && clientSecret != null)
+            {
+                ClientId = clientId;
+                ClientSecret = clientSecret;
+                return;
+            }
+
+            Console.WriteLine("Client ID or Secret not passed in, checking WarcraftLogsClient.json");
+
+            var client = new WarcraftLogsClient();
+            try
+            {
+                using (StreamReader stream = new StreamReader($"{WarcraftLogsClient.NAME}"))
+                {
+                    client = JsonSerializer.Deserialize<WarcraftLogsClient>(stream.ReadToEnd());
+                }
+            }
+            catch (Exception)
+            {
+                // create empty file for user to fill in
+                using (StreamWriter stream = new StreamWriter($"{WarcraftLogsClient.NAME}"))
+                {
+                    string jsonString = JsonSerializer.Serialize<WarcraftLogsClient>(client);
+                    stream.Write(jsonString);
+                }
+
+                throw new Exception($"No ClientID or Secret passed in, and no WarcraftLogsClient.json exists.  Empty file was created, fill it in with info from {WarcraftLogsClient.CLIENT_URL}.  Quitting so the ClientId and ClientSecret can be filled in.");
+            }
+
+            ClientId = client.ClientId;
+            ClientSecret = client.ClientSecret;
+        }
+
+        // Assumes LoadClientIdAndSecret was called and succeeded before this
         private static async Task<string> GetOauthToken()
         {
             if (OAuthToken == String.Empty)
             {
-                using (StreamReader stream = new StreamReader($"{WarcraftLogsClient.NAME}"))
+                try
                 {
-                    try
-                    {
-                        WarcraftLogsClient fileReadResult = JsonSerializer.Deserialize<WarcraftLogsClient>(stream.ReadToEnd());
-
-                        OAuthToken = await GetAccessToken(
-                            clientId: fileReadResult.ClientId,
-                            clientSecret: fileReadResult.ClientSecret
-                        );
-                    }
-                    catch (Exception ex)
-                    {
-                        throw new Exception("Failed to read WarcraftLogsClient.json or obtain OAuth token.", ex);
-                    }
+                    OAuthToken = await GetAccessToken(
+                        clientId: ClientId,
+                        clientSecret: ClientSecret
+                    );
+                }
+                catch (Exception ex)
+                {
+                    throw new Exception("Failed to obtain OAuth token.", ex);
                 }
             }
 

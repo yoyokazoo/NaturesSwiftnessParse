@@ -9,8 +9,10 @@ namespace NaturesSwiftnessParse
 {
     public static class NaturesSwiftnessParse
     {
-        public static async Task RunNaturesSwiftnessReport(List<string> reportIds, int? debugFightId)
+        public static async Task RunNaturesSwiftnessReport(List<string> reportIds, int? debugFightId, string clientId, string clientSecret)
         {
+            WarcraftLogsQuery.LoadClientIdAndSecret(clientId, clientSecret);
+
             // TODO: take and handle multiple IDs in case we have split raids that we want a single report for
             string reportId = reportIds.First();
             Console.WriteLine($"Running Report for {reportId} (Only a single reportId is supported for now)");
