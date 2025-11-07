@@ -55,20 +55,8 @@ namespace NaturesSwiftnessParse
             }
 
             // Get Natures Swiftnesses for whole raid
-            List<int> naturesSwiftnessAbilityIDs = new List<int>{ NaturesSwiftnessEvent.SHAMAN_NS_ABILITY_ID, NaturesSwiftnessEvent.DRUID_NS_ABILITY_ID };
-            foreach (var abilityId in naturesSwiftnessAbilityIDs)
-            {
-                var nsJson = await WarcraftLogsQuery.QueryForAbilityCastEvents(reportId, allFightIds, abilityId);
-                var nsRoot = JsonSerializer.Deserialize<ReportDataRoot>(nsJson);
-                foreach (var ns in nsRoot.Data.ReportData.Report.Events.Data)
-                {
-                    var sourceName = raidReport.GetActor(ns.SourceID.Value);
-                    var nsEvent = new NaturesSwiftnessEvent(sourceName, ns.Timestamp, ns.Fight.Value);
-                    raidReport.AddNaturesSwiftnessEvent(nsEvent);
-                }
-            }
-
-            //raidReport.PrintNaturesSwiftnessEvents();
+            var nsRootResults = await GetNaturesSwiftnessEvents(raidReport, reportId, allFightIds);
+            ProcessNaturesSwiftnessEvents(raidReport, nsRootResults);
 
             // For each fight, grab the heal events and damage events
             var healRootResults = await GetHealingEvents(raidReport, reportId, allFightIds);
@@ -161,6 +149,27 @@ namespace NaturesSwiftnessParse
             raidReport.PrintMostCriticalNaturesSwiftnesses();
         }
 
+        private static void ProcessNaturesSwiftnessEvents(RaidReport raidReport, List<ReportDataRoot>[] nsRootResults)
+        {
+            foreach (var rootResult in nsRootResults)
+            {
+                foreach (var root in rootResult)
+                {
+                    ProcessNaturesSwiftnessEvent(raidReport, root);
+                }
+            }
+        }
+
+        private static void ProcessNaturesSwiftnessEvent(RaidReport raidReport, ReportDataRoot nsRoot)
+        {
+            foreach (var ns in nsRoot.Data.ReportData.Report.Events.Data)
+            {
+                var sourceName = raidReport.GetActor(ns.SourceID.Value);
+                var nsEvent = new NaturesSwiftnessEvent(sourceName, ns.Timestamp, ns.Fight.Value);
+                raidReport.AddNaturesSwiftnessEvent(nsEvent);
+            }
+        }
+
         private static void ProcessHealingEvents(RaidReport raidReport, List<ReportDataRoot>[] healRootResults)
         {
             foreach (var rootResult in healRootResults)
@@ -221,6 +230,31 @@ namespace NaturesSwiftnessParse
                 HealthPointEvent hpEvent = new HealthPointEvent(damageTaken.Timestamp, hpAmount, hpPercent, targetName, damageTaken.TargetID.Value);
                 raidReport.GetFight(damageTaken.Fight.Value).AddHealthPointEvent(hpEvent);
             }
+        }
+
+        private static async Task<List<ReportDataRoot>[]> GetNaturesSwiftnessEvents(RaidReport raidReport, string reportId, List<int> allFightIds)
+        {
+            List<Task<List<ReportDataRoot>>> nsRoots = new List<Task<List<ReportDataRoot>>>();
+            List<int> naturesSwiftnessAbilityIDs = new List<int> { NaturesSwiftnessEvent.SHAMAN_NS_ABILITY_ID, NaturesSwiftnessEvent.DRUID_NS_ABILITY_ID };
+
+            foreach (var abilityId in naturesSwiftnessAbilityIDs)
+            {
+                nsRoots.Add(GetNaturesSwiftnessEvent(raidReport, reportId, allFightIds, abilityId));
+            }
+
+            return await Task.WhenAll(nsRoots);
+        }
+
+        private static async Task<List<ReportDataRoot>> GetNaturesSwiftnessEvent(RaidReport raidReport, string reportId, List<int> allFightIds, int abilityId)
+        {
+            List<ReportDataRoot> nsRoots = new List<ReportDataRoot>();
+
+            var nsJson = await WarcraftLogsQuery.QueryForAbilityCastEvents(reportId, allFightIds, abilityId);
+            var nsRoot = JsonSerializer.Deserialize<ReportDataRoot>(nsJson);
+
+            nsRoots.Add(nsRoot);
+
+            return nsRoots;
         }
 
         private static async Task<List<ReportDataRoot>[]> GetHealingEvents(RaidReport raidReport, string reportId, List<int> allFightIds)
