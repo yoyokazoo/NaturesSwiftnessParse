@@ -21,12 +21,19 @@ namespace NaturesSwiftnessParse
             {
                 using (StreamReader stream = new StreamReader($"{WarcraftLogsClient.NAME}"))
                 {
-                    WarcraftLogsClient fileReadResult = JsonSerializer.Deserialize<WarcraftLogsClient>(stream.ReadToEnd());
+                    try
+                    {
+                        WarcraftLogsClient fileReadResult = JsonSerializer.Deserialize<WarcraftLogsClient>(stream.ReadToEnd());
 
-                    OAuthToken = await GetAccessToken(
-                        clientId: fileReadResult.ClientId,
-                        clientSecret: fileReadResult.ClientSecret
-                    );
+                        OAuthToken = await GetAccessToken(
+                            clientId: fileReadResult.ClientId,
+                            clientSecret: fileReadResult.ClientSecret
+                        );
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new Exception("Failed to read WarcraftLogsClient.json or obtain OAuth token.", ex);
+                    }
                 }
             }
 

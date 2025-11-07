@@ -28,14 +28,17 @@ namespace NaturesSwiftnessParse
 
         static async Task RunNaturesSwiftnessReport(List<string> reportIds, int? debugFightId)
         {
-            Console.WriteLine($"Running Report for {string.Join(",", reportIds)}");
-            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            Console.WriteLine($"Running Report for {string.Join(",", reportIds)} (Only a single reportId is supported for now)");
+            //var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            
+            // TODO: take and handle multiple IDs in case we have split raids that we want a single report for
+            string reportId = reportIds.First();
 
             // Get overarching report with fights and actors
-            var reportJson = await WarcraftLogsQuery.QueryForReport(reportIds.First());
-            var root = JsonSerializer.Deserialize<ReportDataRoot>(reportJson, options);
+            var reportJson = await WarcraftLogsQuery.QueryForReport(reportId);
+            var root = JsonSerializer.Deserialize<ReportDataRoot>(reportJson);
 
-            var raidReport = new RaidReport(reportIds.First(), root.Data.ReportData.Report.Title);
+            var raidReport = new RaidReport(reportId, root.Data.ReportData.Report.Title);
             foreach(var fight in root.Data.ReportData.Report.Fights)
             {
                 var fightReport = new FightReport(fight.Id, fight.Name, fight.StartTime, fight.EndTime);
@@ -59,8 +62,8 @@ namespace NaturesSwiftnessParse
             List<int> naturesSwiftnessAbilityIDs = new List<int>{ NaturesSwiftnessEvent.SHAMAN_NS_ABILITY_ID, NaturesSwiftnessEvent.DRUID_NS_ABILITY_ID };
             foreach (var abilityId in naturesSwiftnessAbilityIDs)
             {
-                var nsJson = await WarcraftLogsQuery.QueryForAbilityCastEvents(reportIds.First(), allFightIds, abilityId);
-                var nsRoot = JsonSerializer.Deserialize<ReportDataRoot>(nsJson, options);
+                var nsJson = await WarcraftLogsQuery.QueryForAbilityCastEvents(reportId, allFightIds, abilityId);
+                var nsRoot = JsonSerializer.Deserialize<ReportDataRoot>(nsJson);
                 foreach (var ns in nsRoot.Data.ReportData.Report.Events.Data)
                 {
                     var sourceName = raidReport.GetActor(ns.SourceID.Value);
@@ -71,69 +74,34 @@ namespace NaturesSwiftnessParse
 
             //raidReport.PrintNaturesSwiftnessEvents();
 
-            // For each fight, grab the heal events
-            foreach(var fightId in allFightIds)
+            // For each fight, grab the heal events and damage events
+            foreach (var fightId in allFightIds)
             {
-                long nextPageTimestamp = 0;
-                var endTime = raidReport.GetFight(fightId).EndTime;
-
-                do
+                var healRoots = await GetHealingEventsForFight(raidReport, reportId, fightId);
+                foreach (var healRoot in healRoots)
                 {
-                    var healJson = await WarcraftLogsQuery.QueryForHealingEvents(reportIds.First(), fightId, nextPageTimestamp, endTime);
-                    var healRoot = JsonSerializer.Deserialize<ReportDataRoot>(healJson, options);
-                    foreach (var heal in healRoot.Data.ReportData.Report.Events.Data)
-                    {
-                        if (heal.Type != "heal") continue; // ignore absorbs from protection potions
+                    ProcessHealingEvents(raidReport, healRoot);
+                }
 
-                        string sourceName = raidReport.GetActor(heal.SourceID.Value);
-                        string targetName = raidReport.GetActor(heal.TargetID.Value);
-                        int healAmount = heal.Amount.Value;
-                        int overheal = heal.Extra.ContainsKey("overheal") ? heal.Extra["overheal"].GetInt32() : 0;
-                        bool critical = heal.Extra["hitType"].GetInt32() == 2; // 1 is normal, 2 is critical
-                        bool hotTick = heal.Extra.ContainsKey("tick");
-                        string abilityName = raidReport.GetAbility(heal.AbilityGameID.Value);
-
-                        var healEvent = new HealEvent(heal.Timestamp, healAmount, overheal, sourceName, targetName, abilityName, critical, hotTick);
-                        raidReport.GetFight(heal.Fight.Value).AddHealEvent(healEvent);
-
-                        // Also log heal events as HP events if they're non-zero
-                        if (healAmount > 0)
-                        {
-                            HealthPointEvent hpEvent = new HealthPointEvent(heal.Timestamp, -1 * healAmount, heal.HitPoints.Value, targetName, heal.TargetID.Value);
-                            raidReport.GetFight(heal.Fight.Value).AddHealthPointEvent(hpEvent);
-                        }
-                    }
-
-                    nextPageTimestamp = healRoot.Data.ReportData.Report.Events.NextPageTimestamp ?? 0;
-                } while (nextPageTimestamp != 0);
-
-                do
+                var damageRoots = await GetDamageEventsForFight(raidReport, reportId, fightId);
+                foreach (var damageRoot in damageRoots)
                 {
-                    // For each fight, grab the damage taken
-                    var damageJson = await WarcraftLogsQuery.QueryForDamageTaken(reportIds.First(), fightId, nextPageTimestamp, endTime);
-                    var damageRoot = JsonSerializer.Deserialize<ReportDataRoot>(damageJson, options);
-                    foreach (var damageTaken in damageRoot.Data.ReportData.Report.Events.Data)
-                    {
-                        if (damageTaken.Amount == 0) continue;
+                    ProcessDamageEvents(raidReport, damageRoot);
+                }
+            }
 
-                        string targetName = raidReport.GetActor(damageTaken.TargetID.Value);
-                        //string actorName = raidReport.GetActor(hpChange.ResourceActor.Value);
-                        int hpAmount = damageTaken.Amount.Value;
-                        int hpPercent = damageTaken.HitPoints.Value;
-                        HealthPointEvent hpEvent = new HealthPointEvent(damageTaken.Timestamp, hpAmount, hpPercent, targetName, damageTaken.TargetID.Value);
-                        raidReport.GetFight(damageTaken.Fight.Value).AddHealthPointEvent(hpEvent);
-                    }
-
-                    nextPageTimestamp = damageRoot.Data.ReportData.Report.Events.NextPageTimestamp ?? 0;
-                } while (nextPageTimestamp != 0);
-
-                // now that we've inserted both, sort the hp timelines
+            // now that we've inserted both, sort the hp timelines
+            foreach (var fightId in allFightIds)
+            {
+                
                 foreach (var hpTimeline in raidReport.GetFight(fightId).HealthPointTimelines.Values)
                 {
                     hpTimeline.SortByTime();
                     //hpTimeline.Print();
                 }
             }
+
+            // asdf
 
             foreach (var nsEvent in raidReport.NaturesSwiftnessEvents)
             {
@@ -208,6 +176,83 @@ namespace NaturesSwiftnessParse
             }
 
             raidReport.PrintMostCriticalNaturesSwiftnesses();
+        }
+
+        private static void ProcessHealingEvents(RaidReport raidReport, ReportDataRoot healRoot)
+        {
+            foreach (var heal in healRoot.Data.ReportData.Report.Events.Data)
+            {
+                if (heal.Type != "heal") continue; // ignore absorbs from protection potions
+
+                string sourceName = raidReport.GetActor(heal.SourceID.Value);
+                string targetName = raidReport.GetActor(heal.TargetID.Value);
+                int healAmount = heal.Amount.Value;
+                int overheal = heal.Extra.ContainsKey("overheal") ? heal.Extra["overheal"].GetInt32() : 0;
+                bool critical = heal.Extra["hitType"].GetInt32() == 2; // 1 is normal, 2 is critical
+                bool hotTick = heal.Extra.ContainsKey("tick");
+                string abilityName = raidReport.GetAbility(heal.AbilityGameID.Value);
+
+                var healEvent = new HealEvent(heal.Timestamp, healAmount, overheal, sourceName, targetName, abilityName, critical, hotTick);
+                raidReport.GetFight(heal.Fight.Value).AddHealEvent(healEvent);
+
+                // Also log heal events as HP events if they're non-zero
+                if (healAmount > 0)
+                {
+                    HealthPointEvent hpEvent = new HealthPointEvent(heal.Timestamp, -1 * healAmount, heal.HitPoints.Value, targetName, heal.TargetID.Value);
+                    raidReport.GetFight(heal.Fight.Value).AddHealthPointEvent(hpEvent);
+                }
+            }
+        }
+
+        private static void ProcessDamageEvents(RaidReport raidReport, ReportDataRoot damageRoot)
+        {
+            foreach (var damageTaken in damageRoot.Data.ReportData.Report.Events.Data)
+            {
+                if (damageTaken.Amount == 0) continue;
+
+                string targetName = raidReport.GetActor(damageTaken.TargetID.Value);
+                //string actorName = raidReport.GetActor(hpChange.ResourceActor.Value);
+                int hpAmount = damageTaken.Amount.Value;
+                int hpPercent = damageTaken.HitPoints.Value;
+                HealthPointEvent hpEvent = new HealthPointEvent(damageTaken.Timestamp, hpAmount, hpPercent, targetName, damageTaken.TargetID.Value);
+                raidReport.GetFight(damageTaken.Fight.Value).AddHealthPointEvent(hpEvent);
+            }
+        }
+
+        private static async Task<List<ReportDataRoot>> GetHealingEventsForFight(RaidReport raidReport, string reportId, int fightId)
+        {
+            long nextPageTimestamp = 0;
+            var endTime = raidReport.GetFight(fightId).EndTime;
+            List<ReportDataRoot> healRoots = new List<ReportDataRoot>();
+
+            do
+            {
+                var healJson = await WarcraftLogsQuery.QueryForHealingEvents(reportId, fightId, nextPageTimestamp, endTime);
+                var healRoot = JsonSerializer.Deserialize<ReportDataRoot>(healJson);
+                healRoots.Add(healRoot);
+                nextPageTimestamp = healRoot.Data.ReportData.Report.Events.NextPageTimestamp ?? 0;
+            }
+            while (nextPageTimestamp != 0);
+
+            return healRoots;
+        }
+
+        private static async Task<List<ReportDataRoot>> GetDamageEventsForFight(RaidReport raidReport, string reportId, int fightId)
+        {
+            long nextPageTimestamp = 0;
+            var endTime = raidReport.GetFight(fightId).EndTime;
+            List<ReportDataRoot> damageRoots = new List<ReportDataRoot>();
+
+            do
+            {
+                // For each fight, grab the damage taken
+                var damageJson = await WarcraftLogsQuery.QueryForDamageTaken(reportId, fightId, nextPageTimestamp, endTime);
+                var damageRoot = JsonSerializer.Deserialize<ReportDataRoot>(damageJson);
+                damageRoots.Add(damageRoot);
+                nextPageTimestamp = damageRoot.Data.ReportData.Report.Events.NextPageTimestamp ?? 0;
+            } while (nextPageTimestamp != 0);
+
+            return damageRoots;
         }
 
         private void textBox1_TextChanged(object sender, EventArgs e)
