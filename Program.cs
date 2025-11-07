@@ -1,22 +1,57 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
+﻿using System.Collections.Generic;
+using System.CommandLine;
 using System.Threading.Tasks;
-using System.Windows.Forms;
 
 namespace NaturesSwiftnessParse
 {
     internal static class Program
     {
-        /// <summary>
-        /// The main entry point for the application.
-        /// </summary>
-        [STAThread]
-        static void Main()
+        static async Task<int> Main(string[] args)
         {
-            Application.EnableVisualStyles();
-            Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new Form1());
+            var reportIdArg = new Argument<string>(
+                name: "reportId",
+                description: "Report Id AKA the string found at the end of https://vanilla.warcraftlogs.com/reports/mQKyfvjhrnGXTzdM (mQKyfvjhrnGXTzdM)"
+            );
+
+            var fightIdArg = new Argument<int?>(
+                name: "fightId",
+                description: "Optional fightId for debugging single fights https://vanilla.warcraftlogs.com/reports/mQKyfvjhrnGXTzdM?fight=20 (20)"
+            )
+            { Arity = ArgumentArity.ZeroOrOne };
+            fightIdArg.SetDefaultValue(null);
+
+            var clientIdArg = new Argument<string>(
+                name: "clientId",
+                description: "WarcraftLogs Client ID found at https://fresh.warcraftlogs.com/api/clients/. Also can be defined in WarcraftLogsClient.json."
+            )
+            { Arity = ArgumentArity.ZeroOrOne };
+
+            var clientSecretArg = new Argument<string>(
+                name: "clientSecret",
+                description: "WarcraftLogs Client Secret found at https://fresh.warcraftlogs.com/api/clients/ when the client was created. Also can be defined in WarcraftLogsClient.json."
+            )
+            { Arity = ArgumentArity.ZeroOrOne };
+
+            
+
+            // Root command
+            var rootCommand = new RootCommand("Parses Nature's Swiftness usage from a Warcraft Logs report.");
+            rootCommand.AddArgument(reportIdArg);
+            rootCommand.AddArgument(fightIdArg);
+            rootCommand.AddArgument(clientIdArg);
+            rootCommand.AddArgument(clientSecretArg);
+
+            // Handler
+            rootCommand.SetHandler(async (string reportId, int? fightId, string clientId, string clientSecret) =>
+            {
+                await NaturesSwiftnessParse.RunNaturesSwiftnessReport(
+                    new List<string> { reportId },
+                    fightId
+                );
+            }, reportIdArg, fightIdArg, clientIdArg, clientSecretArg);
+
+            // Run
+            return rootCommand.Invoke(args);
         }
     }
 }
