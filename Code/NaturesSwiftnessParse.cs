@@ -34,6 +34,8 @@ namespace NaturesSwiftnessParse
             var damageRootResults = await GetDamageEvents(raidReport, reportId, allFightIds);
             ProcessDamageEvents(raidReport, damageRootResults);
 
+            var totemBuffRootResults = await GetTotemBuffEvents(raidReport, reportId, allFightIds);
+
             raidReport.LinkNaturesSwiftnessesAndHeals();
 
             raidReport.PrintMostCriticalNaturesSwiftnesses(eventsToPrint);
@@ -140,6 +142,41 @@ namespace NaturesSwiftnessParse
         {
             var reportJson = await WarcraftLogsQuery.QueryForReport(reportId);
             return JsonSerializer.Deserialize<ReportDataRoot>(reportJson);
+        }
+
+        private static async Task<List<ReportDataRoot>[]> GetTotemBuffEvents(RaidReport raidReport, string reportId, List<int> allFightIds)
+        {
+            List<Task<List<ReportDataRoot>>> buffRoots = new List<Task<List<ReportDataRoot>>>();
+            List<int> buffAbilityIDs = new List<int> { TotemBuffEvent.WINDFURY_ABILITY_ID };
+
+            foreach (var abilityId in buffAbilityIDs)
+            {
+                buffRoots.Add(GetTotemBuffEventsForAbility(raidReport, reportId, allFightIds, abilityId));
+            }
+
+            return await Task.WhenAll(buffRoots);
+        }
+
+        private static async Task<List<ReportDataRoot>> GetTotemBuffEventsForAbility(RaidReport raidReport, string reportId, List<int> allFightIds, int abilityId)
+        {
+            List<ReportDataRoot> buffRoots = new List<ReportDataRoot>();
+
+            foreach (var fightId in allFightIds)
+            {
+                long nextPageTimestamp = 0;
+                var endTime = raidReport.GetFight(fightId).EndTime;
+
+                do
+                {
+                    var buffJson = await WarcraftLogsQuery.QueryForBuffEvents(reportId, fightId, nextPageTimestamp, endTime, abilityId);
+                    var buffRoot = JsonSerializer.Deserialize<ReportDataRoot>(buffJson);
+                    buffRoots.Add(buffRoot);
+                    nextPageTimestamp = buffRoot.Data.ReportData.Report.Events.NextPageTimestamp ?? 0;
+                }
+                while (nextPageTimestamp != 0);
+            }
+
+            return buffRoots;
         }
 
         private static async Task<List<ReportDataRoot>[]> GetNaturesSwiftnessEvents(RaidReport raidReport, string reportId, List<int> allFightIds)

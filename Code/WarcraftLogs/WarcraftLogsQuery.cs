@@ -217,5 +217,34 @@ namespace NaturesSwiftnessParse
 
             return await QueryWarcraftLogs(payload);
         }
+
+        public const int BUFF_EVENT_QUERY_LIMIT = 250;
+        public static async Task<string> QueryForBuffEvents(string reportId, int fightId, long startTime, long endTime, int abilityId)
+        {
+            var query = $@"
+            {{
+              reportData {{
+                report(code: ""{reportId}"") {{
+                  events(
+                    dataType: Buffs
+                    abilityID: {abilityId}
+                    fightIDs: [{fightId}]
+                    includeResources: true
+                    startTime: {startTime}
+                    endTime: {endTime}
+                    limit: {BUFF_EVENT_QUERY_LIMIT}
+                  ) {{
+                    data
+                    nextPageTimestamp
+                  }}
+                }}
+              }}
+            }}
+            ";
+
+            var payload = JsonSerializer.Serialize(new { query });
+
+            return await QueryWarcraftLogs(payload);
+        }
     }
 }

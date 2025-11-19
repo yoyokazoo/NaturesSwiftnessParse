@@ -8,6 +8,14 @@ namespace NaturesSwiftnessParse
     {
         static async Task<int> Main(string[] args)
         {
+            #if DEBUG
+                args = new[]
+                {
+                    "FjNc9ZVRnrDQ32zG",
+                    "fightId", "16"
+                };
+            #endif
+
             var reportIdArg = new Argument<string>(
                 name: "reportId",
                 description: "Report Id AKA the string found at the end of https://vanilla.warcraftlogs.com/reports/mQKyfvjhrnGXTzdM (mQKyfvjhrnGXTzdM)"
