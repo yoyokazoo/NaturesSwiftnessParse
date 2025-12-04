@@ -115,6 +115,12 @@ namespace NaturesSwiftnessParse
                 var highlightEvent = criticalSwiftnessEvents[i];
                 var highlightFight = Fights[highlightEvent.FightId];
 
+                // Casters can cast NS but then not cast a follow-up heal, so just skip it
+                if (highlightEvent.HealEvent == null)
+                {
+                    continue;
+                }
+
                 var healDelay = highlightEvent.HealEvent.Time - highlightEvent.NSDamageEvent.Time;
                 var healDelayString = FormatMilliseconds(healDelay);
 
@@ -170,6 +176,13 @@ namespace NaturesSwiftnessParse
                 // Link the ns to the heal
                 FightReport fight = GetFight(nsEvent.FightId);
                 HealTimeline healTimeline = fight.GetHealTimeline(nsEvent.CasterName);
+
+                // Casters can cast NS but then not cast a follow-up heal, so just skip it
+                if (healTimeline == null)
+                {
+                    continue;
+                }    
+
                 foreach (HealEvent heal in healTimeline.Events)
                 {
                     if (heal.Time < nsEvent.Time) continue;

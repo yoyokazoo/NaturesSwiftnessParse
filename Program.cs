@@ -8,13 +8,21 @@ namespace NaturesSwiftnessParse
     {
         static async Task<int> Main(string[] args)
         {
-            #if DEBUG
+#if DEBUG
                 args = new[]
+                {
+                    "PW73TdcXKJaQ41Cv",
+                    "fightId", "31"
+                };
+#endif
+
+            /*
+             * args = new[]
                 {
                     "FjNc9ZVRnrDQ32zG",
                     "fightId", "16"
                 };
-            #endif
+             * */
 
             var reportIdArg = new Argument<string>(
                 name: "reportId",

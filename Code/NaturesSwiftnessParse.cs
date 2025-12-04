@@ -35,10 +35,39 @@ namespace NaturesSwiftnessParse
             ProcessDamageEvents(raidReport, damageRootResults);
 
             var totemBuffRootResults = await GetTotemBuffEvents(raidReport, reportId, allFightIds);
+            ProcessTotemBuffEvents(raidReport, totemBuffRootResults);
 
             raidReport.LinkNaturesSwiftnessesAndHeals();
 
             raidReport.PrintMostCriticalNaturesSwiftnesses(eventsToPrint);
+        }
+
+        private static void ProcessTotemBuffEvents(RaidReport raidReport, List<ReportDataRoot>[] buffRootResults)
+        {
+            foreach (var rootResult in buffRootResults)
+            {
+                foreach (var root in rootResult)
+                {
+                    ProcessTotemBuffEvent(raidReport, root);
+                }
+            }
+        }
+
+        private static void ProcessTotemBuffEvent(RaidReport raidReport, ReportDataRoot buffRoot)
+        {
+            int testCounter = 0;
+            foreach (var buff in buffRoot.Data.ReportData.Report.Events.Data)
+            {
+                if (buff.Type != "applybuff") continue;
+
+                testCounter++;
+                //var sourceName = raidReport.GetActor(buff.SourceID.Value);
+                //var nsEvent = new NaturesSwiftnessEvent(sourceName, buff.Timestamp, buff.Fight.Value);
+                //raidReport.AddNaturesSwiftnessEvent(nsEvent);
+            }
+
+            Console.WriteLine($"Processed {buffRoot.Data.ReportData.Report.Events.Data.Count} buffs, of which {testCounter} were applyBuff");
+            testCounter++;
         }
 
         private static void ProcessNaturesSwiftnessEvents(RaidReport raidReport, List<ReportDataRoot>[] nsRootResults)
