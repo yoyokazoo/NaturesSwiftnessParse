@@ -127,7 +127,7 @@ namespace NaturesSwiftnessParse
                 var damageLink = $"https://vanilla.warcraftlogs.com/reports/{Id}?fight={highlightFight.Id}&type=resources&source={highlightEvent.HealHealthPointEvent.Id}&view=events";
                 var fightLink = $"https://vanilla.warcraftlogs.com/reports/{Id}?fight={highlightFight.Id}";
 
-                string highlightString = $"{i+1}: {highlightEvent.CasterName} NS'ed {highlightEvent.HealEvent.TargetName} at {highlightEvent.HealHealthPointEvent.Percent}%, {healDelayString} after they got [hit to {highlightEvent.HealDamageEvent.Percent}%]({damageLink}) during [{highlightFight.Name}]({fightLink})";
+                string highlightString = $"{i+1}: {highlightEvent.CasterName} NS'ed {highlightEvent.HealEvent.TargetName} at {highlightEvent.HealHealthPointEvent.Percent}%, {healDelayString} after they got [hit to {highlightEvent.NSDamageEvent.Percent}%]({damageLink}) during [{highlightFight.Name}]({fightLink})";
 
                 // Write method to find follow up Nature's Swiftnesses and call them out
                 List<NaturesSwiftnessEvent> followUpNS = new List<NaturesSwiftnessEvent>();
