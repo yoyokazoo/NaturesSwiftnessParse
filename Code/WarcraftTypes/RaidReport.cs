@@ -181,10 +181,17 @@ namespace NaturesSwiftnessParse
                 if (healTimeline == null)
                 {
                     continue;
-                }    
+                }
 
-                foreach (HealEvent heal in healTimeline.Events)
+                long currentTimestamp = 0;
+                for (int healEventIndex = 0; healEventIndex < healTimeline.Events.Count; healEventIndex++)
                 {
+                    HealEvent heal = healTimeline.Events[healEventIndex];
+
+                    // Simultaneous heals are chain heal bounces.  They're already in order, so only care about the 1st one
+                    if (TimesApproximatelyMatch(heal.Time, currentTimestamp)) continue;
+                    currentTimestamp = heal.Time;
+
                     if (heal.Time < nsEvent.Time) continue;
                     if (heal.HotTick) continue;
 
@@ -282,6 +289,11 @@ namespace NaturesSwiftnessParse
                 formatted = formatted.TrimStart('0');
 
             return $"{formatted}s";
+        }
+
+        public static bool TimesApproximatelyMatch(long time1, long time2)
+        {
+            return Math.Abs(time1 - time2) < 5;
         }
     }
 

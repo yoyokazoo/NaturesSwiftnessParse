@@ -20,12 +20,12 @@ namespace NaturesSwiftnessParse
         public void AddEvent(HealEvent healEvent)
         {
             bool sortingChainHeal = false;
-            // Chain heal bounces get logged at the same time
+            // Chain heal bounces get logged at the same time (EDIT: almost the same! sometimes they are within 1 ms of one another)
             // If we're on the same timestamp, sort them by pre-critical heal amount
             for(int i = Events.Count - 1; i >= 0; i--)
             {
                 var otherHealEvent = Events[i];
-                if (otherHealEvent.Time == healEvent.Time)
+                if (RaidReport.TimesApproximatelyMatch(otherHealEvent.Time, healEvent.Time))
                 {
                     // if we're smaller than the one we're looking at, insert where we're at
                     if (healEvent.GetPreCriticalHealAmount() < otherHealEvent.GetPreCriticalHealAmount())
