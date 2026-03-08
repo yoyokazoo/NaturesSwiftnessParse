@@ -84,9 +84,17 @@ jobs:
       env:
         Configuration: ${{ matrix.configuration }}
 
-    # Upload the build output
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
+    # Zip the build output
+    - name: Zip build output
+      run: Compress-Archive -Path bin\${{ matrix.configuration }}\* -DestinationPath NaturesSwiftnessParse.zip
+
+    # Publish to GitHub Releases as a rolling "latest" release
+    - name: Publish to GitHub Releases
+      if: github.event_name == 'push'
+      uses: ncipollo/release-action@v1
       with:
-        name: Build Output
-        path: bin\${{ matrix.configuration }}
+        tag: latest
+        name: Latest Build
+        artifacts: NaturesSwiftnessParse.zip
+        allowUpdates: true
+        token: ${{ secrets.GITHUB_TOKEN }}
