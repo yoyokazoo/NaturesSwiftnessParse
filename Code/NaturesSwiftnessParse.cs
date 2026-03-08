@@ -104,6 +104,11 @@ namespace NaturesSwiftnessParse
 
         private static void ProcessHealingEvent(RaidReport raidReport, ReportDataRoot healRoot)
         {
+            if (healRoot?.Data?.ReportData?.Report?.Events?.Data == null)
+            {
+                Console.WriteLine("???");
+            }
+
             foreach (var heal in healRoot.Data.ReportData.Report.Events.Data)
             {
                 if (heal.Type != "heal") continue; // ignore absorbs from protection potions
@@ -122,6 +127,12 @@ namespace NaturesSwiftnessParse
                 // Also log heal events as HP events if they're non-zero
                 if (healAmount > 0)
                 {
+                    if (!heal.HitPoints.HasValue || !heal.TargetID.HasValue)
+                    {
+                        Console.WriteLine("???");
+                        continue;
+                    }
+
                     HealthPointEvent hpEvent = new HealthPointEvent(heal.Timestamp, -1 * healAmount, heal.HitPoints.Value, targetName, heal.TargetID.Value);
                     raidReport.GetFight(heal.Fight.Value).AddHealthPointEvent(hpEvent);
                 }
@@ -143,6 +154,12 @@ namespace NaturesSwiftnessParse
             foreach (var damageTaken in damageRoot.Data.ReportData.Report.Events.Data)
             {
                 if (damageTaken.Amount == 0) continue;
+
+                if(!damageTaken.HitPoints.HasValue)
+                {
+                    Console.WriteLine("???");
+                    continue;
+                }
 
                 string targetName = raidReport.GetActor(damageTaken.TargetID.Value);
                 //string actorName = raidReport.GetActor(hpChange.ResourceActor.Value);

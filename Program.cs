@@ -11,8 +11,7 @@ namespace NaturesSwiftnessParse
 #if DEBUG
                 args = new[]
                 {
-                    "VB6LxJFbtTG9Nkym",
-                    "fightId", "30"
+                    "wqWkVPDMHmxXahR8"
                 };
 #endif
 
