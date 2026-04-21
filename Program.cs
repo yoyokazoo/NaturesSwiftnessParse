@@ -42,6 +42,7 @@ namespace NaturesSwiftnessParse
             { Arity = ArgumentArity.ZeroOrOne };
             playerNameArg.SetDefaultValue(null);
 
+
             var eventsToPrintArg = new Option<int>(
                 name: "eventsToPrint",
                 description: "Optional argument to choose how many NS events to print (default 5)"
