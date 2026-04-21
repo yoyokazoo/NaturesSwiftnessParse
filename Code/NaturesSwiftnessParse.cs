@@ -8,7 +8,7 @@ namespace NaturesSwiftnessParse
 {
     public static class NaturesSwiftnessParse
     {
-        public static async Task RunNaturesSwiftnessReport(List<string> reportIds, int? debugFightId, int eventsToPrint, string clientId, string clientSecret)
+        public static async Task RunNaturesSwiftnessReport(List<string> reportIds, int? debugFightId, int eventsToPrint, string clientId, string clientSecret, string playerName = null)
         {
             // TODO: take and handle multiple IDs in case we have split raids that we want a single report for
             string reportId = reportIds.First();
@@ -26,6 +26,12 @@ namespace NaturesSwiftnessParse
             // Get Natures Swiftnesses for whole raid
             var nsRootResults = await GetNaturesSwiftnessEvents(raidReport, reportId, allFightIds);
             ProcessNaturesSwiftnessEvents(raidReport, nsRootResults);
+
+            if (playerName != null)
+            {
+                Console.WriteLine($"Filtering to only {playerName}'s Nature's Swiftnesses");
+                raidReport.NaturesSwiftnessEvents.RemoveAll(ns => !ns.CasterName.Equals(playerName, StringComparison.OrdinalIgnoreCase));
+            }
 
             // For each fight, grab the heal events and damage events
             var healRootResults = await GetHealingEvents(raidReport, reportId, allFightIds);
@@ -66,7 +72,7 @@ namespace NaturesSwiftnessParse
                 //raidReport.AddNaturesSwiftnessEvent(nsEvent);
             }
 
-            Console.WriteLine($"Processed {buffRoot.Data.ReportData.Report.Events.Data.Count} buffs, of which {testCounter} were applyBuff");
+            //Console.WriteLine($"Processed {buffRoot.Data.ReportData.Report.Events.Data.Count} buffs, of which {testCounter} were applyBuff");
             testCounter++;
         }
 

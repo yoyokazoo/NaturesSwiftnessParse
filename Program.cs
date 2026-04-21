@@ -35,6 +35,13 @@ namespace NaturesSwiftnessParse
             { Arity = ArgumentArity.ZeroOrOne };
             fightIdArg.SetDefaultValue(null);
 
+            var playerNameArg = new Option<string>(
+                name: "playerName",
+                description: "Optional player name to only process that player's Nature's Swiftnesses"
+            )
+            { Arity = ArgumentArity.ZeroOrOne };
+            playerNameArg.SetDefaultValue(null);
+
             var eventsToPrintArg = new Option<int>(
                 name: "eventsToPrint",
                 description: "Optional argument to choose how many NS events to print (default 5)"
@@ -63,18 +70,20 @@ namespace NaturesSwiftnessParse
             rootCommand.Add(eventsToPrintArg);
             rootCommand.Add(clientIdArg);
             rootCommand.Add(clientSecretArg);
+            rootCommand.Add(playerNameArg);
 
             // Handler
-            rootCommand.SetHandler(async (string reportId, int? fightId, int eventsToPrint, string clientId, string clientSecret) =>
+            rootCommand.SetHandler(async (string reportId, int? fightId, int eventsToPrint, string clientId, string clientSecret, string playerName) =>
             {
                 await NaturesSwiftnessParse.RunNaturesSwiftnessReport(
                     new List<string> { reportId },
                     fightId,
                     eventsToPrint,
                     clientId,
-                    clientSecret
+                    clientSecret,
+                    playerName
                 );
-            }, reportIdArg, fightIdArg, eventsToPrintArg, clientIdArg, clientSecretArg);
+            }, reportIdArg, fightIdArg, eventsToPrintArg, clientIdArg, clientSecretArg, playerNameArg);
 
             // Run
             return rootCommand.Invoke(args);

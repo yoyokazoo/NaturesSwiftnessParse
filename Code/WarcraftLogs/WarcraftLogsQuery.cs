@@ -29,7 +29,7 @@ namespace NaturesSwiftnessParse
                 return;
             }
 
-            Console.WriteLine("Client ID or Secret not passed in, checking WarcraftLogsClient.json");
+            //Console.WriteLine("Client ID or Secret not passed in, checking WarcraftLogsClient.json");
 
             var client = new WarcraftLogsClient();
             try

@@ -99,13 +99,14 @@ namespace NaturesSwiftnessParse
 
         public void PrintMostCriticalNaturesSwiftnesses(int eventCountToHighlight)
         {
-            Console.WriteLine($"Most Critical Nature's Swiftnesses:");
+            Console.WriteLine();
+            //Console.WriteLine($"Most Critical Nature's Swiftnesses:");
 
             List<NaturesSwiftnessEvent> criticalSwiftnessEvents = new List<NaturesSwiftnessEvent>(NaturesSwiftnessEvents);
             NaturesSwiftnessEventSorter.SortByHealHealthPercent(criticalSwiftnessEvents);
             foreach(var nsEvent in criticalSwiftnessEvents)
             {
-                Console.WriteLine($"\t{nsEvent}");
+                //Console.WriteLine($"\t{nsEvent}");
             }
 
             // Now that we have the top nature's swiftness events, present them in a pleasing manner
@@ -217,7 +218,7 @@ namespace NaturesSwiftnessParse
                     Console.WriteLine($"null healthPointTimeline for fight {fight.Id} for {nsEvent.HealEvent.TargetName}, might be worth looking into");
                     continue;
                 }
-                healthPointTimeline.Print();
+                //healthPointTimeline.Print();
 
                 HealthPointEvent hpChangeBeforeNS = null;
                 HealthPointEvent hpChangeBeforeHeal = null;
