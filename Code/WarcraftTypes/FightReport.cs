@@ -8,17 +8,34 @@ namespace NaturesSwiftnessParse
         public string Name { get; private set; }
         public int StartTime { get; private set; }
         public int EndTime { get; private set; }
+        public int EncounterId { get; private set; }
+        // 0 encounterID means trash; any named encounter is a boss fight
+        public bool IsBossFight => EncounterId != 0;
         public Dictionary<string, HealthPointTimeline> HealthPointTimelines { get; private set; }
         public Dictionary<string, HealTimeline> HealTimelines { get; private set; }
+        public Dictionary<int, CombatantGearInfo> CombatantGearByActorId { get; private set; }
 
-        public FightReport(int id, string name, int startTime, int endTime)
+        public FightReport(int id, string name, int startTime, int endTime, int encounterId = 0)
         {
             Id = id;
             Name = name;
             HealthPointTimelines = new Dictionary<string, HealthPointTimeline>();
             HealTimelines = new Dictionary<string, HealTimeline>();
+            CombatantGearByActorId = new Dictionary<int, CombatantGearInfo>();
             StartTime = startTime;
             EndTime = endTime;
+            EncounterId = encounterId;
+        }
+
+        // CombatantGearByActorId
+        public void AddCombatantGearInfo(CombatantGearInfo gearInfo)
+        {
+            CombatantGearByActorId[gearInfo.ActorId] = gearInfo;
+        }
+
+        public CombatantGearInfo GetCombatantGearInfo(int actorId)
+        {
+            return CombatantGearByActorId.TryGetValue(actorId, out var gearInfo) ? gearInfo : null;
         }
 
         // HealthPointTimelines

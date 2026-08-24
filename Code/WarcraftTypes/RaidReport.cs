@@ -11,6 +11,9 @@ namespace NaturesSwiftnessParse
         public Dictionary<int, FightReport> Fights { get; set; }
         public List<NaturesSwiftnessEvent> NaturesSwiftnessEvents { get; set; }
         public Dictionary<int, string> ActorsById { get; set; }
+        public Dictionary<int, string> ActorTypeById { get; set; }
+        public Dictionary<int, string> ActorClassById { get; set; }
+        public Dictionary<int, int?> ActorPetOwnerById { get; set; }
         public Dictionary<int, string> AbilitiesById { get; set; }
 
         public RaidReport(string id, string name)
@@ -20,6 +23,9 @@ namespace NaturesSwiftnessParse
             Fights = new Dictionary<int, FightReport>();
             NaturesSwiftnessEvents = new List<NaturesSwiftnessEvent>();
             ActorsById = new Dictionary<int, string>();
+            ActorTypeById = new Dictionary<int, string>();
+            ActorClassById = new Dictionary<int, string>();
+            ActorPetOwnerById = new Dictionary<int, int?>();
             AbilitiesById = new Dictionary<int, string>();
             PopulateAbilities();
         }
@@ -41,16 +47,37 @@ namespace NaturesSwiftnessParse
             NaturesSwiftnessEvents.Add(nsEvent);
         }
 
-        public void AddActor(int id, string name)
+        public void AddActor(int id, string name, string type = null, string subType = null, int? petOwner = null)
         {
-            ActorsById.Add(id, name);
+            ActorsById[id] = name;
+            ActorTypeById[id] = type ?? string.Empty;
+            ActorClassById[id] = subType ?? string.Empty;
+            ActorPetOwnerById[id] = petOwner;
         }
 
         public string GetActor(int id)
         {
             if (!ActorsById.ContainsKey(id)) return id.ToString();
-            
+
             return ActorsById[id];
+        }
+
+        // "Player", "NPC", "Pet" -- empty string if unknown
+        public string GetActorType(int id)
+        {
+            return ActorTypeById.TryGetValue(id, out var type) ? type : string.Empty;
+        }
+
+        // Player class (e.g. "Warrior", "Rogue") -- empty string for non-players/unknown
+        public string GetActorClass(int id)
+        {
+            return ActorClassById.TryGetValue(id, out var subType) ? subType : string.Empty;
+        }
+
+        // Actor id of the owning player, for pets/totems -- null if not a pet or unknown
+        public int? GetActorPetOwner(int id)
+        {
+            return ActorPetOwnerById.TryGetValue(id, out var petOwner) ? petOwner : null;
         }
 
         public void AddAbility(int id, string name)

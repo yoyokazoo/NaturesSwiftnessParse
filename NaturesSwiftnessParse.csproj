@@ -83,9 +83,11 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Code\NaturesSwiftnessParse.cs" />
+    <Compile Include="Code\WindfuryUptimeParse.cs" />
     <Compile Include="Code\WarcraftLogs\GraphQLReportData.cs" />
     <Compile Include="Code\WarcraftLogsClient.cs" />
     <Compile Include="Code\WarcraftLogs\WarcraftLogsQuery.cs" />
+    <Compile Include="Code\WarcraftTypes\CombatantGearInfo.cs" />
     <Compile Include="Code\WarcraftTypes\FightReport.cs" />
     <Compile Include="Code\WarcraftTypes\HealEvent.cs" />
     <Compile Include="Code\WarcraftTypes\HealthPointEvent.cs" />
@@ -94,6 +96,8 @@
     <Compile Include="Code\WarcraftTypes\TotemBuffEvent.cs" />
     <Compile Include="Code\WarcraftTypes\NaturesSwiftnessEvent.cs" />
     <Compile Include="Code\WarcraftTypes\RaidReport.cs" />
+    <Compile Include="Code\WarcraftTypes\WindfuryFightResult.cs" />
+    <Compile Include="Code\WarcraftTypes\WindfuryPlayerFightResult.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <EmbeddedResource Include="Properties\Resources.resx">

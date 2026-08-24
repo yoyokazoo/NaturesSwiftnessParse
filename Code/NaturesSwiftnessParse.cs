@@ -40,40 +40,9 @@ namespace NaturesSwiftnessParse
             var damageRootResults = await GetDamageEvents(raidReport, reportId, allFightIds);
             ProcessDamageEvents(raidReport, damageRootResults);
 
-            var totemBuffRootResults = await GetTotemBuffEvents(raidReport, reportId, allFightIds);
-            ProcessTotemBuffEvents(raidReport, totemBuffRootResults);
-
             raidReport.LinkNaturesSwiftnessesAndHeals();
 
             raidReport.PrintMostCriticalNaturesSwiftnesses(eventsToPrint);
-        }
-
-        private static void ProcessTotemBuffEvents(RaidReport raidReport, List<ReportDataRoot>[] buffRootResults)
-        {
-            foreach (var rootResult in buffRootResults)
-            {
-                foreach (var root in rootResult)
-                {
-                    ProcessTotemBuffEvent(raidReport, root);
-                }
-            }
-        }
-
-        private static void ProcessTotemBuffEvent(RaidReport raidReport, ReportDataRoot buffRoot)
-        {
-            int testCounter = 0;
-            foreach (var buff in buffRoot.Data.ReportData.Report.Events.Data)
-            {
-                if (buff.Type != "applybuff") continue;
-
-                testCounter++;
-                //var sourceName = raidReport.GetActor(buff.SourceID.Value);
-                //var nsEvent = new NaturesSwiftnessEvent(sourceName, buff.Timestamp, buff.Fight.Value);
-                //raidReport.AddNaturesSwiftnessEvent(nsEvent);
-            }
-
-            //Console.WriteLine($"Processed {buffRoot.Data.ReportData.Report.Events.Data.Count} buffs, of which {testCounter} were applyBuff");
-            testCounter++;
         }
 
         private static void ProcessNaturesSwiftnessEvents(RaidReport raidReport, List<ReportDataRoot>[] nsRootResults)
@@ -175,60 +144,26 @@ namespace NaturesSwiftnessParse
                 raidReport.GetFight(damageTaken.Fight.Value).AddHealthPointEvent(hpEvent);
             }
         }
-        private static RaidReport ProcessFightsAndActors(string reportId, ReportDataRoot reportDataRoot)
+        // internal: also used by WindfuryUptimeParse, which needs the same fights/actors data
+        internal static RaidReport ProcessFightsAndActors(string reportId, ReportDataRoot reportDataRoot)
         {
             var raidReport = new RaidReport(reportId, reportDataRoot.Data.ReportData.Report.Title);
             foreach (var fight in reportDataRoot.Data.ReportData.Report.Fights)
             {
-                var fightReport = new FightReport(fight.Id, fight.Name, fight.StartTime, fight.EndTime);
+                var fightReport = new FightReport(fight.Id, fight.Name, fight.StartTime, fight.EndTime, fight.EncounterID);
                 raidReport.AddFight(fightReport);
             }
             foreach (var actor in reportDataRoot.Data.ReportData.Report.MasterData.Actors)
             {
-                raidReport.AddActor(actor.Id, actor.Name);
+                raidReport.AddActor(actor.Id, actor.Name, actor.Type, actor.SubType, actor.PetOwner);
             }
             return raidReport;
         }
 
-        private static async Task<ReportDataRoot> GetFightsAndActors(string reportId)
+        internal static async Task<ReportDataRoot> GetFightsAndActors(string reportId)
         {
             var reportJson = await WarcraftLogsQuery.QueryForReport(reportId);
             return JsonSerializer.Deserialize<ReportDataRoot>(reportJson);
-        }
-
-        private static async Task<List<ReportDataRoot>[]> GetTotemBuffEvents(RaidReport raidReport, string reportId, List<int> allFightIds)
-        {
-            List<Task<List<ReportDataRoot>>> buffRoots = new List<Task<List<ReportDataRoot>>>();
-            List<int> buffAbilityIDs = new List<int> { TotemBuffEvent.WINDFURY_ABILITY_ID };
-
-            foreach (var abilityId in buffAbilityIDs)
-            {
-                buffRoots.Add(GetTotemBuffEventsForAbility(raidReport, reportId, allFightIds, abilityId));
-            }
-
-            return await Task.WhenAll(buffRoots);
-        }
-
-        private static async Task<List<ReportDataRoot>> GetTotemBuffEventsForAbility(RaidReport raidReport, string reportId, List<int> allFightIds, int abilityId)
-        {
-            List<ReportDataRoot> buffRoots = new List<ReportDataRoot>();
-
-            foreach (var fightId in allFightIds)
-            {
-                long nextPageTimestamp = 0;
-                var endTime = raidReport.GetFight(fightId).EndTime;
-
-                do
-                {
-                    var buffJson = await WarcraftLogsQuery.QueryForBuffEvents(reportId, fightId, nextPageTimestamp, endTime, abilityId);
-                    var buffRoot = JsonSerializer.Deserialize<ReportDataRoot>(buffJson);
-                    buffRoots.Add(buffRoot);
-                    nextPageTimestamp = buffRoot.Data.ReportData.Report.Events.NextPageTimestamp ?? 0;
-                }
-                while (nextPageTimestamp != 0);
-            }
-
-            return buffRoots;
         }
 
         private static async Task<List<ReportDataRoot>[]> GetNaturesSwiftnessEvents(RaidReport raidReport, string reportId, List<int> allFightIds)

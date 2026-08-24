@@ -54,6 +54,10 @@ public sealed class Actor
     [JsonPropertyName("type")]
     public string Type { get; set; } = string.Empty;
 
+    // Player class (e.g. "Warrior", "Rogue", "Shaman"). Empty for NPCs/pets.
+    [JsonPropertyName("subType")]
+    public string SubType { get; set; } = string.Empty;
+
     // Null for player/NPC; actor id for pet owner
     [JsonPropertyName("petOwner")]
     public int? PetOwner { get; set; }
@@ -76,6 +80,10 @@ public class Fight
 
     [JsonPropertyName("endTime")]
     public int EndTime { get; set; } = 0;
+
+    // 0 for trash; non-zero identifies a named boss encounter
+    [JsonPropertyName("encounterID")]
+    public int EncounterID { get; set; } = 0;
 }
 
 public sealed class EventsPage

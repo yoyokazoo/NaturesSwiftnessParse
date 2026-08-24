@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.CommandLine;
 using System.Threading.Tasks;
 
@@ -11,11 +12,18 @@ namespace NaturesSwiftnessParse
 #if DEBUG
                 args = new[]
                 {
-                    "wqWkVPDMHmxXahR8"
+                    "CLMRnrG9DcVA4txY",
+                    "fightId", "66",
+                    "playerName", "Kaysham",
+                    "mode", "windfury"
                 };
 #endif
 
             /*
+             * args = new[]
+                {
+                    "wqWkVPDMHmxXahR8"
+                };
              * args = new[]
                 {
                     "FjNc9ZVRnrDQ32zG",
@@ -62,7 +70,12 @@ namespace NaturesSwiftnessParse
             )
             { Arity = ArgumentArity.ZeroOrOne };
 
-            
+            var modeArg = new Option<string>(
+                name: "mode",
+                description: "Which report to run: \"ns\" (Nature's Swiftness, default) or \"windfury\" (Windfury Totem uptime)"
+            )
+            { Arity = ArgumentArity.ZeroOrOne };
+            modeArg.SetDefaultValue("ns");
 
             // Root command
             var rootCommand = new RootCommand("Parses Nature's Swiftness usage from a Warcraft Logs report.");
@@ -72,19 +85,33 @@ namespace NaturesSwiftnessParse
             rootCommand.Add(clientIdArg);
             rootCommand.Add(clientSecretArg);
             rootCommand.Add(playerNameArg);
+            rootCommand.Add(modeArg);
 
             // Handler
-            rootCommand.SetHandler(async (string reportId, int? fightId, int eventsToPrint, string clientId, string clientSecret, string playerName) =>
+            rootCommand.SetHandler(async (string reportId, int? fightId, int eventsToPrint, string clientId, string clientSecret, string playerName, string mode) =>
             {
-                await NaturesSwiftnessParse.RunNaturesSwiftnessReport(
-                    new List<string> { reportId },
-                    fightId,
-                    eventsToPrint,
-                    clientId,
-                    clientSecret,
-                    playerName
-                );
-            }, reportIdArg, fightIdArg, eventsToPrintArg, clientIdArg, clientSecretArg, playerNameArg);
+                if (string.Equals(mode, "windfury", StringComparison.OrdinalIgnoreCase))
+                {
+                    await WindfuryUptimeParse.RunWindfuryUptimeReport(
+                        reportId,
+                        fightId,
+                        clientId,
+                        clientSecret,
+                        playerName
+                    );
+                }
+                else
+                {
+                    await NaturesSwiftnessParse.RunNaturesSwiftnessReport(
+                        new List<string> { reportId },
+                        fightId,
+                        eventsToPrint,
+                        clientId,
+                        clientSecret,
+                        playerName
+                    );
+                }
+            }, reportIdArg, fightIdArg, eventsToPrintArg, clientIdArg, clientSecretArg, playerNameArg, modeArg);
 
             // Run
             return rootCommand.Invoke(args);

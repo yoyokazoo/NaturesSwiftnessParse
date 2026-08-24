@@ -119,12 +119,14 @@ namespace NaturesSwiftnessParse
                     name
                     startTime
                     endTime
+                    encounterID
                   }}
                   masterData {{
                     actors {{
                       id
                       name
                       type
+                      subType
                       petOwner
                     }}
                   }}
@@ -233,6 +235,35 @@ namespace NaturesSwiftnessParse
                     startTime: {startTime}
                     endTime: {endTime}
                     limit: {BUFF_EVENT_QUERY_LIMIT}
+                  ) {{
+                    data
+                    nextPageTimestamp
+                  }}
+                }}
+              }}
+            }}
+            ";
+
+            var payload = JsonSerializer.Serialize(new { query });
+
+            return await QueryWarcraftLogs(payload);
+        }
+
+        public const int COMBATANT_INFO_QUERY_LIMIT = 250;
+        // CombatantInfo rows are a per-player gear/talent/aura snapshot taken near the pull of each
+        // fight -- used here to determine each warrior/rogue's main-hand weapon enchant.
+        public static async Task<string> QueryForCombatantInfo(string reportId, int fightId, long startTime, long endTime)
+        {
+            var query = $@"
+            {{
+              reportData {{
+                report(code: ""{reportId}"") {{
+                  events(
+                    dataType: CombatantInfo
+                    fightIDs: [{fightId}]
+                    startTime: {startTime}
+                    endTime: {endTime}
+                    limit: {COMBATANT_INFO_QUERY_LIMIT}
                   ) {{
                     data
                     nextPageTimestamp
