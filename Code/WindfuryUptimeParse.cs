@@ -67,12 +67,10 @@ namespace NaturesSwiftnessParse
             // with buffs already active from before pull, outside that fight's own event window) may
             // not contain the co-application timestamp needed to link its members at all, but the
             // same players almost always show up together in at least one fight across the night.
-            // This means even a single-fight debug run (--fightId) still queries party buffs across
-            // the whole report -- slower, but necessary for correct grouping.
-            var partyBuffResults = await GetPartyBuffEvents(raidReport, reportId, allReportFightIds);
-            var partyBuffEventsByFight = ProcessPartyBuffEvents(partyBuffResults);
-            var allPartyBuffEvents = partyBuffEventsByFight.Values.SelectMany(e => e).ToList();
-            var groupOf = InferPartyGroups(allPartyBuffEvents);
+            // Querying party buffs for every fight in the report (x10 ability ranks each) can easily
+            // be hundreds of requests, so this stops as soon as every shaman has been placed in some
+            // group rather than exhausting every fight.
+            var groupOf = await InferPartyGroupsIncrementally(raidReport, reportId, allReportFightIds, debugFightId, debugGear);
             if (debugGear) PrintInferredGroups(raidReport, groupOf);
 
             var fightResults = new List<WindfuryFightResult>();
@@ -155,16 +153,14 @@ namespace NaturesSwiftnessParse
             return buffRoots;
         }
 
-        private static async Task<List<(int FightId, int AbilityId, List<ReportDataRoot> Roots)>> GetPartyBuffEvents(RaidReport raidReport, string reportId, List<int> allFightIds)
+        // All party-buff ability ranks for a single fight, fetched in parallel.
+        private static async Task<List<(int AbilityId, List<ReportDataRoot> Roots)>> GetPartyBuffEventsForFight(RaidReport raidReport, string reportId, int fightId)
         {
-            var tasks = new List<Task<(int FightId, int AbilityId, List<ReportDataRoot> Roots)>>();
-            foreach (var fightId in allFightIds)
+            var tasks = PartyBuffAbilityIds.Select(async abilityId =>
             {
-                foreach (var abilityId in PartyBuffAbilityIds)
-                {
-                    tasks.Add(GetPartyBuffEventsForFightAndAbility(raidReport, reportId, fightId, abilityId));
-                }
-            }
+                var (_, _, roots) = await GetPartyBuffEventsForFightAndAbility(raidReport, reportId, fightId, abilityId);
+                return (abilityId, roots);
+            });
 
             return (await Task.WhenAll(tasks)).ToList();
         }
@@ -367,13 +363,82 @@ namespace NaturesSwiftnessParse
             public int GroupOf(int x) => Find(x);
         }
 
+        // A vanilla party is capped at 5, so a "full" inferred group is the shaman plus 4 others.
+        private const int FULL_PARTY_SIZE = 5;
+
+        // Fetches party-buff events one fight at a time (all 10 ability ranks for that fight in
+        // parallel), re-running group inference after each fight and stopping only once every
+        // shaman actor in the raid has a *full* group of 5 (not just some group). Querying every
+        // fight in a full report x10 ability ranks each can be hundreds of requests, so this still
+        // stops as soon as it safely can -- but a partial group (a member who just never landed in
+        // range for a tracked buff yet) isn't good enough to stop on, since it would silently under-
+        // count that shaman's eligible players. Fights are checked with the debug fight (if any)
+        // first, since that's the one actually being analyzed, then longest-duration-first (more
+        // time for a party buff to land). If every fight gets checked and some shaman still doesn't
+        // have a full group, whatever was found is used as a best effort.
+        private static async Task<Dictionary<int, int>> InferPartyGroupsIncrementally(RaidReport raidReport, string reportId, List<int> allReportFightIds, int? debugFightId, bool debugGear)
+        {
+            var shamanIds = raidReport.ActorsById.Keys
+                .Where(id => raidReport.GetActorClass(id).Equals("Shaman", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            var fightsToCheck = allReportFightIds
+                .OrderByDescending(id => debugFightId.HasValue && id == debugFightId.Value)
+                .ThenByDescending(id => raidReport.GetFight(id).EndTime - raidReport.GetFight(id).StartTime)
+                .ToList();
+
+            var accumulatedEvents = new List<EventRow>();
+            var groupOf = new Dictionary<int, int>();
+            int fightsChecked = 0;
+
+            foreach (var fightId in fightsToCheck)
+            {
+                fightsChecked++;
+                var abilityResults = await GetPartyBuffEventsForFight(raidReport, reportId, fightId);
+                var processed = ProcessPartyBuffEvents(abilityResults.Select(r => (fightId, r.AbilityId, r.Roots)).ToList());
+                accumulatedEvents.AddRange(processed.Values.SelectMany(e => e));
+
+                groupOf = InferPartyGroups(raidReport, accumulatedEvents);
+
+                int fullShamans = CountShamansWithFullGroup(raidReport, shamanIds, groupOf);
+                if (shamanIds.Count > 0 && fullShamans == shamanIds.Count)
+                {
+                    if (debugGear) Console.WriteLine($"DEBUG: all {shamanIds.Count} shaman(s) have a full group of {FULL_PARTY_SIZE} after checking {fightsChecked}/{fightsToCheck.Count} fight(s) for party buffs -- stopping early.");
+                    return groupOf;
+                }
+            }
+
+            if (debugGear)
+            {
+                int fullShamans = CountShamansWithFullGroup(raidReport, shamanIds, groupOf);
+                int anyGroupShamans = shamanIds.Count(id => groupOf.ContainsKey(id));
+                Console.WriteLine($"DEBUG: checked all {fightsChecked} fight(s) for party buffs; {fullShamans}/{shamanIds.Count} shaman(s) have a full group of {FULL_PARTY_SIZE}, {anyGroupShamans}/{shamanIds.Count} have some group.");
+            }
+
+            return groupOf;
+        }
+
+        // Pets tag along with their owner's party (e.g. a hunter's pet catching Battle Shout too)
+        // but don't take up one of the party's 5 player slots -- only real players count toward
+        // "full".
+        private static int CountShamansWithFullGroup(RaidReport raidReport, List<int> shamanIds, Dictionary<int, int> groupOf)
+        {
+            var clusterPlayerSizes = groupOf
+                .Where(kv => raidReport.GetActorType(kv.Key) == "Player")
+                .GroupBy(kv => kv.Value)
+                .ToDictionary(g => g.Key, g => g.Count());
+
+            return shamanIds.Count(id => groupOf.TryGetValue(id, out var groupId) && clusterPlayerSizes.TryGetValue(groupId, out var size) && size == FULL_PARTY_SIZE);
+        }
+
         // Infers 5-man party membership from party-restricted buffs (see PartyBuffAbilityIds):
         // when one of them applies to several players at the exact same timestamp, that's one
-        // cast hitting up to 5 party members at once, so they get unioned together. A batch that
-        // hits more than 5 targets can't be a single party-restricted cast (a party is capped at
-        // 5) -- most likely two different casters' buffs landing on the same tick -- so it's
-        // skipped rather than risking an incorrect merge.
-        private static Dictionary<int, int> InferPartyGroups(List<EventRow> partyBuffEvents)
+        // cast hitting up to 5 party members at once, so they get unioned together. Pets can tag
+        // along in the same batch as their owner without counting against that cap. A batch that
+        // hits more than 5 *player* targets can't be a single party-restricted cast (a party is
+        // capped at 5) -- most likely two different casters' buffs landing on the same tick -- so
+        // it's skipped rather than risking an incorrect merge.
+        private static Dictionary<int, int> InferPartyGroups(RaidReport raidReport, List<EventRow> partyBuffEvents)
         {
             var unionFind = new UnionFind();
 
@@ -384,9 +449,10 @@ namespace NaturesSwiftnessParse
             foreach (var batch in byAbilityAndTime)
             {
                 var targets = batch.Select(e => e.TargetID.Value).Distinct().ToList();
-                if (targets.Count > 5)
+                var playerTargetCount = targets.Count(id => raidReport.GetActorType(id) == "Player");
+                if (playerTargetCount > 5)
                 {
-                    Console.WriteLine($"DEBUG: ability {batch.Key.Item1} hit {targets.Count} targets at the same instant (> 5, a party's max size) -- skipping this batch for group inference.");
+                    Console.WriteLine($"DEBUG: ability {batch.Key.Item1} hit {playerTargetCount} player targets at the same instant (> 5, a party's max size) -- skipping this batch for group inference.");
                     continue;
                 }
 
@@ -488,6 +554,8 @@ namespace NaturesSwiftnessParse
                     shamanActorId,
                     shamanName,
                     mergedIntervals,
+                    relevantEvents.Select(e => e.Timestamp).ToList(),
+                    fightStart,
                     fightEnd - fightStart
                 );
 
@@ -562,6 +630,12 @@ namespace NaturesSwiftnessParse
                     foreach (var playerResult in shamanGroup)
                     {
                         Console.WriteLine($"    {playerResult}");
+                        // Only show the full interval-merge trace when narrowed to one shaman --
+                        // otherwise this would dump a trace per player per fight for the whole raid.
+                        if (playerNameFilter != null)
+                        {
+                            Console.WriteLine(playerResult.FormatDebugTrace());
+                        }
                     }
                 }
 

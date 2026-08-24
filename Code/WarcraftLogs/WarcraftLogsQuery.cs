@@ -7,6 +7,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace NaturesSwiftnessParse
@@ -96,15 +97,61 @@ namespace NaturesSwiftnessParse
             return token;
         }
 
+        // Caps how many requests are in flight at once -- callers (e.g. WindfuryUptimeParse) can
+        // fan out dozens/hundreds of queries via Task.WhenAll, and firing them all simultaneously is
+        // what trips WCL's rate limiting. 5 concurrent requests is conservative but keeps things
+        // moving without bursting.
+        private static readonly SemaphoreSlim _concurrencyLimiter = new SemaphoreSlim(5, 5);
+
+        private const int MAX_RATE_LIMIT_RETRIES = 5;
+
+        // WCL's rate limiting is an hourly points quota, not just a burst limit -- if it's been
+        // exhausted, the Retry-After it sends back can be tens of minutes. Retrying that
+        // automatically would just hang the CLI, so only auto-retry short waits (a real burst) and
+        // fail fast with a clear message otherwise.
+        private static readonly TimeSpan MAX_AUTO_RETRY_DELAY = TimeSpan.FromSeconds(30);
+
         public static async Task<string> QueryWarcraftLogs(string payload)
         {
             var token = await GetOauthToken();
             var content = new StringContent(payload, Encoding.UTF8, "application/json");
 
-            _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            var resp = await _client.PostAsync("https://www.warcraftlogs.com/api/v2/client", content);
-            resp.EnsureSuccessStatusCode();
-            return await resp.Content.ReadAsStringAsync();
+            await _concurrencyLimiter.WaitAsync();
+            try
+            {
+                for (int attempt = 0; ; attempt++)
+                {
+                    _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                    var resp = await _client.PostAsync("https://www.warcraftlogs.com/api/v2/client", content);
+
+                    if ((int)resp.StatusCode == 429)
+                    {
+                        // Honor Retry-After when WCL sends one; otherwise back off with jitter.
+                        var retryAfter = resp.Headers.RetryAfter?.Delta ?? TimeSpan.FromSeconds(Math.Pow(2, attempt + 1));
+
+                        if (retryAfter > MAX_AUTO_RETRY_DELAY)
+                        {
+                            throw new Exception($"WCL API rate limit hit (429) and the requested retry wait is {retryAfter.TotalMinutes:0.#} minutes -- likely the hourly points quota is exhausted, not just a burst. Not auto-retrying; wait for the quota to reset and try again.");
+                        }
+
+                        if (attempt >= MAX_RATE_LIMIT_RETRIES)
+                        {
+                            throw new Exception($"WCL API rate limit hit (429) {MAX_RATE_LIMIT_RETRIES} times in a row; giving up.");
+                        }
+
+                        Console.WriteLine($"WARNING: WCL API rate limit hit (429), retrying in {retryAfter.TotalSeconds:0.#}s (attempt {attempt + 1}/{MAX_RATE_LIMIT_RETRIES})...");
+                        await Task.Delay(retryAfter);
+                        continue;
+                    }
+
+                    resp.EnsureSuccessStatusCode();
+                    return await resp.Content.ReadAsStringAsync();
+                }
+            }
+            finally
+            {
+                _concurrencyLimiter.Release();
+            }
         }
 
         public static async Task<string> QueryForReport(string reportId)
