@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -111,8 +112,24 @@ namespace NaturesSwiftnessParse
         // fail fast with a clear message otherwise.
         private static readonly TimeSpan MAX_AUTO_RETRY_DELAY = TimeSpan.FromSeconds(30);
 
+        // Same reportId/fightId/ability/etc. always produces the same GraphQL query text, and a
+        // given query's result never changes once fetched (WCL reports are immutable), so responses
+        // are cached to disk keyed by a hash of the exact query. This is by far the biggest lever on
+        // wall-clock time across repeated runs against the same report while iterating -- a cache
+        // hit skips the network entirely (no OAuth token fetch, no concurrency wait).
+        private const string CACHE_DIR = "WarcraftLogsCache";
+        public static bool CacheEnabled = true;
+
         public static async Task<string> QueryWarcraftLogs(string payload)
         {
+            string cacheFilePath = CacheEnabled ? Path.Combine(CACHE_DIR, ComputeCacheKey(payload) + ".json") : null;
+
+            if (cacheFilePath != null)
+            {
+                var cached = TryReadCache(cacheFilePath);
+                if (cached != null) return cached;
+            }
+
             var token = await GetOauthToken();
             var content = new StringContent(payload, Encoding.UTF8, "application/json");
 
@@ -145,12 +162,61 @@ namespace NaturesSwiftnessParse
                     }
 
                     resp.EnsureSuccessStatusCode();
-                    return await resp.Content.ReadAsStringAsync();
+                    var result = await resp.Content.ReadAsStringAsync();
+                    if (cacheFilePath != null) WriteCache(cacheFilePath, result);
+                    return result;
                 }
             }
             finally
             {
                 _concurrencyLimiter.Release();
+            }
+        }
+
+        private static string ComputeCacheKey(string payload)
+        {
+            using (var sha256 = SHA256.Create())
+            {
+                var hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(payload));
+                return BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
+            }
+        }
+
+        // Returns the cached response text, or null on a miss (file doesn't exist) or anything that
+        // looks like a corrupt/unreadable cache entry -- either way, falling through to a live fetch
+        // is always safe, so failures here are swallowed rather than thrown.
+        private static string TryReadCache(string path)
+        {
+            try
+            {
+                if (!File.Exists(path)) return null;
+                var text = File.ReadAllText(path);
+                return string.IsNullOrEmpty(text) ? null : text;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        // Writes via a uniquely-named temp file then a move, so a crash mid-write (or two identical
+        // requests racing) never leaves behind a partially-written cache entry that TryReadCache
+        // could hand back as if it were a full response.
+        private static void WriteCache(string path, string content)
+        {
+            try
+            {
+                Directory.CreateDirectory(CACHE_DIR);
+                var tempPath = $"{path}.{Guid.NewGuid():N}.tmp";
+                File.WriteAllText(tempPath, content);
+                if (File.Exists(path)) File.Delete(path);
+                File.Move(tempPath, path);
+            }
+            catch (Exception ex)
+            {
+                // Failing to cache shouldn't fail the whole run -- just means this response gets
+                // re-fetched next time.
+                Console.WriteLine($"WARNING: failed to write cache file {path}: {ex.Message}");
             }
         }
 

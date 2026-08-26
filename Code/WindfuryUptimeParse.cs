@@ -49,12 +49,18 @@ namespace NaturesSwiftnessParse
 
             var allReportFightIds = raidReport.Fights.Keys.ToList();
 
-            // If we're debugging a single fight, only fetch combatant info/Windfury events for that
-            // one -- but party-buff data is always fetched report-wide (see below), regardless of
-            // debugFightId.
+            // If we're debugging a single fight, only fetch Windfury events for that one -- but
+            // CombatantInfo and party-buff data are always fetched report-wide (see below),
+            // regardless of debugFightId.
             var allFightIds = debugFightId.HasValue ? new List<int> { debugFightId.Value } : allReportFightIds;
 
-            var combatantInfoResults = await GetCombatantInfo(raidReport, reportId, allFightIds);
+            // CombatantInfo (gear/enchant snapshots) only exists for real boss pulls -- WCL never
+            // captures it for trash. Querying it for every boss fight in the report (a small subset
+            // of all fights) rather than just the debug fight lets ComputeWindfuryForFight fall back
+            // to a nearby boss pull's snapshot for fights (trash, or a boss with no snapshot of its
+            // own) that don't have one -- see GetNearestGearInfo.
+            var bossFightIds = allReportFightIds.Where(id => raidReport.GetFight(id).IsBossFight).ToList();
+            var combatantInfoResults = await GetCombatantInfo(raidReport, reportId, bossFightIds);
             ProcessCombatantInfo(raidReport, combatantInfoResults);
 
             var windfuryBuffResults = await GetWindfuryBuffEvents(raidReport, reportId, allFightIds);
@@ -221,6 +227,31 @@ namespace NaturesSwiftnessParse
                 var seenTypes = string.Join(", ", rows.Select(r => r.Type).Distinct());
                 Console.WriteLine($"WARNING: got {rows.Count} CombatantInfo row(s) for fight {fightId} but none had type == \"combatantinfo\" (saw: {seenTypes}). Field-name assumptions may be wrong -- inspect raw JSON.");
             }
+        }
+
+        // CombatantInfo is only ever snapshotted at boss pulls, so a trash fight (or occasionally a
+        // boss fight with no snapshot of its own) has to borrow the closest-in-time boss pull's gear
+        // info for a given actor instead. Returns null if that actor has no snapshot anywhere in the
+        // whole report.
+        private static CombatantGearInfo GetNearestGearInfo(RaidReport raidReport, int actorId, FightReport targetFight)
+        {
+            CombatantGearInfo nearest = null;
+            long nearestDistance = long.MaxValue;
+
+            foreach (var fight in raidReport.Fights.Values)
+            {
+                var gearInfo = fight.GetCombatantGearInfo(actorId);
+                if (gearInfo == null) continue;
+
+                long distance = Math.Abs(fight.StartTime - targetFight.StartTime);
+                if (distance < nearestDistance)
+                {
+                    nearestDistance = distance;
+                    nearest = gearInfo;
+                }
+            }
+
+            return nearest;
         }
 
         private static CombatantGearInfo ParseCombatantGearInfo(EventRow row, int actorId, int fightId)
@@ -499,13 +530,22 @@ namespace NaturesSwiftnessParse
                 .GroupBy(id => groupOf[id])
                 .ToDictionary(g => g.Key, g => g.Min());
 
+            (int? ShamanActorId, string ShamanName) AttributeShamanForActor(int actorId)
+            {
+                if (groupOf.TryGetValue(actorId, out var groupId) && shamanByGroupId.TryGetValue(groupId, out var shamanId))
+                {
+                    return (shamanId, raidReport.GetActor(shamanId));
+                }
+                return (null, null);
+            }
+
             var eventsByTarget = windfuryEvents
                 .Where(e => e.TargetID.HasValue)
                 .GroupBy(e => e.TargetID.Value)
                 .ToDictionary(g => g.Key, g => g.OrderBy(e => e.Timestamp).ToList());
 
             bool debugGear = Environment.GetEnvironmentVariable("WF_DEBUG_GEAR") == "1";
-            int consideredCount = 0, noGearCount = 0, tempEnchantCount = 0;
+            int consideredCount = 0, noWeaponCount = 0, assumedEligibleCount = 0, tempEnchantCount = 0;
 
             foreach (var actorId in raidReport.ActorsById.Keys)
             {
@@ -514,38 +554,56 @@ namespace NaturesSwiftnessParse
 
                 consideredCount++;
 
-                var gearInfo = fight.GetCombatantGearInfo(actorId);
-                if (gearInfo == null || !gearInfo.HasMainHandWeapon)
+                // CombatantInfo only exists for boss pulls (never trash), so this fight might have no
+                // snapshot of its own -- fall back to the nearest boss pull that does have one for
+                // this actor. Gear/enchants rarely change mid-raid-night.
+                var gearInfo = fight.GetCombatantGearInfo(actorId) ?? GetNearestGearInfo(raidReport, actorId, fight);
+
+                if (gearInfo == null)
                 {
-                    noGearCount++;
-                    Console.WriteLine($"DEBUG: skipping {raidReport.GetActor(actorId)} for fight {fightId} ({fight.Name}) -- no main-hand weapon data available");
+                    // No snapshot anywhere in the whole report for this actor -- can't confirm
+                    // eligibility either way. Assume eligible rather than excluding them: a real
+                    // disqualifying temp enchant has turned out to be rare/nonexistent in practice
+                    // once Windfury's own enchant markers are excluded (see WINDFURY_TOTEM_ENCHANT_IDS),
+                    // while unconditionally excluding would zero out every trash fight, since WCL
+                    // never snapshots those at all.
+                    assumedEligibleCount++;
+                    if (debugGear) Console.WriteLine($"DEBUG: no main-hand weapon data anywhere in the report for {raidReport.GetActor(actorId)} (fight {fightId}, {fight.Name}) -- assuming eligible");
+                }
+                else if (!gearInfo.HasMainHandWeapon)
+                {
+                    // A real snapshot exists (this fight's own, or the nearest boss pull's) and it
+                    // explicitly shows no main-hand weapon -- that's a real signal, not missing data.
+                    noWeaponCount++;
+                    if (debugGear) Console.WriteLine($"DEBUG: skipping {raidReport.GetActor(actorId)} for fight {fightId} ({fight.Name}) -- nearest known snapshot shows no main-hand weapon");
                     continue;
                 }
-                bool hasDisqualifyingEnchant = gearInfo.MainHandHasTemporaryEnchant
-                    && !TotemBuffEvent.WINDFURY_TOTEM_ENCHANT_IDS.Contains(gearInfo.MainHandTemporaryEnchantId.Value);
+                else
+                {
+                    bool hasDisqualifyingEnchant = gearInfo.MainHandHasTemporaryEnchant
+                        && !TotemBuffEvent.WINDFURY_TOTEM_ENCHANT_IDS.Contains(gearInfo.MainHandTemporaryEnchantId.Value);
 
-                if (hasDisqualifyingEnchant)
-                {
-                    tempEnchantCount++;
-                    if (debugGear) Console.WriteLine($"DEBUG: {raidReport.GetActor(actorId)} ({raidReport.GetActorClass(actorId)}) ineligible for fight {fightId} -- {gearInfo}");
-                    continue; // Sharpening Stone / Instant Poison / etc. -- not Windfury eligible this fight
-                }
-                else if (debugGear && gearInfo.MainHandHasTemporaryEnchant)
-                {
-                    Console.WriteLine($"DEBUG: {raidReport.GetActor(actorId)} ({raidReport.GetActorClass(actorId)}) already has Windfury (enchant {gearInfo.MainHandTemporaryEnchantId}) at pull for fight {fightId} -- eligible, not disqualifying");
+                    if (hasDisqualifyingEnchant)
+                    {
+                        tempEnchantCount++;
+                        var (dqShamanId, dqShamanName) = AttributeShamanForActor(actorId);
+                        fightResult.DisqualifiedPlayers.Add(new WindfuryDisqualifiedPlayer(
+                            actorId, raidReport.GetActor(actorId), dqShamanId, dqShamanName,
+                            gearInfo.MainHandTemporaryEnchantId.Value, gearInfo.FightId));
+                        if (debugGear) Console.WriteLine($"DEBUG: {raidReport.GetActor(actorId)} ({raidReport.GetActorClass(actorId)}) ineligible for fight {fightId} -- {gearInfo}");
+                        continue; // Sharpening Stone / Instant Poison / etc. -- not Windfury eligible this fight
+                    }
+                    else if (debugGear && gearInfo.MainHandHasTemporaryEnchant)
+                    {
+                        Console.WriteLine($"DEBUG: {raidReport.GetActor(actorId)} ({raidReport.GetActorClass(actorId)}) already has Windfury (enchant {gearInfo.MainHandTemporaryEnchantId}) at pull for fight {fightId} -- eligible, not disqualifying");
+                    }
                 }
 
                 var relevantEvents = eventsByTarget.TryGetValue(actorId, out var events) ? events : new List<EventRow>();
 
                 var mergedIntervals = MergeWindfuryIntervals(fightId, fightStart, fightEnd, relevantEvents);
 
-                int? shamanActorId = null;
-                string shamanName = null;
-                if (groupOf.TryGetValue(actorId, out var playerGroupId) && shamanByGroupId.TryGetValue(playerGroupId, out var shamanId))
-                {
-                    shamanActorId = shamanId;
-                    shamanName = raidReport.GetActor(shamanId);
-                }
+                var (shamanActorId, shamanName) = AttributeShamanForActor(actorId);
 
                 var playerResult = new WindfuryPlayerFightResult(
                     fightId,
@@ -564,7 +622,7 @@ namespace NaturesSwiftnessParse
 
             if (debugGear)
             {
-                Console.WriteLine($"DEBUG: fight {fightId} ({fight.Name}) eligibility: {consideredCount} warrior/rogue actor(s) considered, {noGearCount} had no gear data, {tempEnchantCount} had a main-hand temp enchant, {fightResult.PlayerResults.Count} eligible.");
+                Console.WriteLine($"DEBUG: fight {fightId} ({fight.Name}) eligibility: {consideredCount} warrior/rogue actor(s) considered, {noWeaponCount} had no main-hand weapon, {assumedEligibleCount} had no snapshot anywhere (assumed eligible), {tempEnchantCount} had a main-hand temp enchant, {fightResult.PlayerResults.Count} eligible.");
             }
 
             return fightResult;
@@ -615,19 +673,29 @@ namespace NaturesSwiftnessParse
                 var fightType = fightResult.IsBossFight ? "Boss" : "Trash";
                 Console.WriteLine($"\nFight {fightResult.FightId} ({fightResult.FightName}) [{fightType}]:");
 
-                var byShaman = fightResult.PlayerResults
+                var eligibleByShaman = fightResult.PlayerResults
                     .Where(r => r.ShamanActorId.HasValue)
-                    .GroupBy(r => (r.ShamanActorId.Value, r.ShamanName));
+                    .GroupBy(r => (r.ShamanActorId.Value, r.ShamanName))
+                    .ToDictionary(g => g.Key, g => g.ToList());
+                var disqualifiedByShaman = fightResult.DisqualifiedPlayers
+                    .Where(d => d.ShamanActorId.HasValue)
+                    .GroupBy(d => (d.ShamanActorId.Value, d.ShamanName))
+                    .ToDictionary(g => g.Key, g => g.ToList());
+
+                var allShamanKeys = eligibleByShaman.Keys.Union(disqualifiedByShaman.Keys).OrderBy(k => k.ShamanName);
 
                 bool printedAny = false;
-                foreach (var shamanGroup in byShaman)
+                foreach (var shamanKey in allShamanKeys)
                 {
-                    if (playerNameFilter != null && !shamanGroup.Key.ShamanName.Equals(playerNameFilter, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (playerNameFilter != null && !shamanKey.ShamanName.Equals(playerNameFilter, StringComparison.OrdinalIgnoreCase)) continue;
 
                     printedAny = true;
-                    var members = shamanGroup.Select(r => r.PlayerName).ToList();
-                    Console.WriteLine($"  {shamanGroup.Key.ShamanName}'s group: {string.Join(", ", members)}");
-                    foreach (var playerResult in shamanGroup)
+                    eligibleByShaman.TryGetValue(shamanKey, out var eligibleMembers);
+                    eligibleMembers = eligibleMembers ?? new List<WindfuryPlayerFightResult>();
+
+                    var members = eligibleMembers.Select(r => r.PlayerName).ToList();
+                    Console.WriteLine($"  {shamanKey.ShamanName}'s group: {string.Join(", ", members)}");
+                    foreach (var playerResult in eligibleMembers)
                     {
                         Console.WriteLine($"    {playerResult}");
                         // Only show the full interval-merge trace when narrowed to one shaman --
@@ -635,6 +703,17 @@ namespace NaturesSwiftnessParse
                         if (playerNameFilter != null)
                         {
                             Console.WriteLine(playerResult.FormatDebugTrace());
+                        }
+                    }
+
+                    // Otherwise-eligible-class group members excluded this fight because their
+                    // main-hand weapon had a real (non-Windfury) temporary enchant -- called out by
+                    // player, fight, and enchant id so the exclusion is visible, not silent.
+                    if (disqualifiedByShaman.TryGetValue(shamanKey, out var disqualified))
+                    {
+                        foreach (var dq in disqualified)
+                        {
+                            Console.WriteLine($"    (excluded, possible Sharpening Stone/Poison) {dq}");
                         }
                     }
                 }

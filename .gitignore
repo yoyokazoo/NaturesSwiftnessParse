@@ -3,6 +3,9 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
+# Cached WarcraftLogs API responses (see WarcraftLogsQuery.cs) -- regenerated on demand, per-user
+WarcraftLogsCache/
+
 # User-specific files
 *.rsuser
 *.suo
