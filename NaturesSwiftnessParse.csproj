@@ -98,6 +98,7 @@
     <Compile Include="Code\WarcraftTypes\NaturesSwiftnessEvent.cs" />
     <Compile Include="Code\WarcraftTypes\RaidReport.cs" />
     <Compile Include="Code\WarcraftTypes\WindfuryFightResult.cs" />
+    <Compile Include="Code\WarcraftTypes\WindfuryGroupFightResult.cs" />
     <Compile Include="Code\WarcraftTypes\WindfuryPlayerFightResult.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

@@ -620,6 +620,21 @@ namespace NaturesSwiftnessParse
                 fightResult.PlayerResults.Add(playerResult);
             }
 
+            // "Maximum uptime" per shaman-group: union each eligible attributed player's own merged
+            // intervals together, so a moment counts as covered as long as ANY of them had Windfury
+            // -- players can drift in and out of totem range independently, so the group as a whole
+            // can be covered even when every individual's own uptime looks partial.
+            foreach (var shamanGroup in fightResult.PlayerResults.Where(r => r.ShamanActorId.HasValue).GroupBy(r => (r.ShamanActorId.Value, r.ShamanName)))
+            {
+                var rawIntervals = shamanGroup.SelectMany(r => r.MergedIntervals.Select(iv => (iv.StartTime, iv.EndTime))).ToList();
+                var unionIntervals = MergeIntervals(rawIntervals)
+                    .Select(m => new TotemBuffEvent(m.Start, m.End, fightId, TotemBuffEvent.WINDFURY_ABILITY_ID))
+                    .ToList();
+
+                fightResult.GroupResults.Add(new WindfuryGroupFightResult(
+                    fightId, shamanGroup.Key.Item1, shamanGroup.Key.ShamanName, unionIntervals, shamanGroup.Count(), fightEnd - fightStart));
+            }
+
             if (debugGear)
             {
                 Console.WriteLine($"DEBUG: fight {fightId} ({fight.Name}) eligibility: {consideredCount} warrior/rogue actor(s) considered, {noWeaponCount} had no main-hand weapon, {assumedEligibleCount} had no snapshot anywhere (assumed eligible), {tempEnchantCount} had a main-hand temp enchant, {fightResult.PlayerResults.Count} eligible.");
@@ -645,10 +660,20 @@ namespace NaturesSwiftnessParse
                 rawIntervals.Add((evt.Timestamp, end));
             }
 
-            rawIntervals.Sort((a, b) => a.Start.CompareTo(b.Start));
+            return MergeIntervals(rawIntervals)
+                .Select(m => new TotemBuffEvent(m.Start, m.End, fightId, TotemBuffEvent.WINDFURY_ABILITY_ID))
+                .ToList();
+        }
+
+        // Classic merge-intervals over arbitrary (start, end) pairs, not necessarily sorted or
+        // non-overlapping going in. Shared by both per-player interval merging and the per-group
+        // union merge above.
+        private static List<(long Start, long End)> MergeIntervals(List<(long Start, long End)> rawIntervals)
+        {
+            var sorted = rawIntervals.OrderBy(i => i.Start).ToList();
 
             var merged = new List<(long Start, long End)>();
-            foreach (var interval in rawIntervals)
+            foreach (var interval in sorted)
             {
                 if (merged.Count > 0 && interval.Start <= merged[merged.Count - 1].End)
                 {
@@ -661,7 +686,7 @@ namespace NaturesSwiftnessParse
                 }
             }
 
-            return merged.Select(m => new TotemBuffEvent(m.Start, m.End, fightId, TotemBuffEvent.WINDFURY_ABILITY_ID)).ToList();
+            return merged;
         }
 
         // ----- Printing -----
@@ -716,6 +741,12 @@ namespace NaturesSwiftnessParse
                             Console.WriteLine($"    (excluded, possible Sharpening Stone/Poison) {dq}");
                         }
                     }
+
+                    var groupResult = fightResult.GroupResults.FirstOrDefault(g => (g.ShamanActorId, g.ShamanName) == shamanKey);
+                    if (groupResult != null)
+                    {
+                        Console.WriteLine($"    {groupResult}");
+                    }
                 }
 
                 if (playerNameFilter == null)
@@ -736,42 +767,65 @@ namespace NaturesSwiftnessParse
         private static void PrintSummary(List<WindfuryFightResult> fightResults, string playerNameFilter)
         {
             var allResults = fightResults.SelectMany(f => f.PlayerResults).Where(r => r.ShamanActorId.HasValue).ToList();
+            var allGroupResults = fightResults.SelectMany(f => f.GroupResults).ToList();
             var bossFightIds = new HashSet<int>(fightResults.Where(f => f.IsBossFight).Select(f => f.FightId));
 
             Console.WriteLine();
             Console.WriteLine("Windfury Uptime Summary");
             Console.WriteLine();
 
-            var shamanGroups = allResults
-                .GroupBy(r => (r.ShamanActorId.Value, r.ShamanName))
-                .OrderBy(g => g.Key.ShamanName);
+            var shamanNamesById = new Dictionary<int, string>();
+            foreach (var r in allResults) shamanNamesById[r.ShamanActorId.Value] = r.ShamanName;
+            foreach (var g in allGroupResults) shamanNamesById[g.ShamanActorId] = g.ShamanName;
 
-            foreach (var shamanGroup in shamanGroups)
+            foreach (var shamanId in shamanNamesById.Keys.OrderBy(id => shamanNamesById[id]))
             {
-                if (playerNameFilter != null && !shamanGroup.Key.ShamanName.Equals(playerNameFilter, StringComparison.OrdinalIgnoreCase)) continue;
+                var shamanName = shamanNamesById[shamanId];
+                if (playerNameFilter != null && !shamanName.Equals(playerNameFilter, StringComparison.OrdinalIgnoreCase)) continue;
 
-                PrintUptimeBucket(shamanGroup.Key.ShamanName, shamanGroup.ToList(), bossFightIds);
+                var shamanResults = allResults.Where(r => r.ShamanActorId.Value == shamanId).ToList();
+                var shamanGroupResults = allGroupResults.Where(g => g.ShamanActorId == shamanId).ToList();
+                PrintUptimeBucket(shamanName, shamanResults, shamanGroupResults, bossFightIds);
             }
 
             if (playerNameFilter == null)
             {
                 Console.WriteLine();
-                PrintUptimeBucket("Raid-wide (all shamans)", allResults, bossFightIds);
+                PrintUptimeBucket("Raid-wide (all shamans)", allResults, allGroupResults, bossFightIds);
             }
         }
 
-        private static void PrintUptimeBucket(string label, List<WindfuryPlayerFightResult> results, HashSet<int> bossFightIds)
+        private static void PrintUptimeBucket(string label, List<WindfuryPlayerFightResult> results, List<WindfuryGroupFightResult> groupResults, HashSet<int> bossFightIds)
         {
             var overall = ComputeTimeWeightedUptime(results);
             var boss = ComputeTimeWeightedUptime(results.Where(r => bossFightIds.Contains(r.FightId)).ToList());
             var trash = ComputeTimeWeightedUptime(results.Where(r => !bossFightIds.Contains(r.FightId)).ToList());
-
             Console.WriteLine($"{label}: Overall {overall:0.#}%, Boss {boss:0.#}%, Trash {trash:0.#}%");
+
+            // Max uptime: union of the group's members' coverage per fight, so groups of different
+            // sizes count equally (one data point per fight, not one per player-fight).
+            var maxOverall = ComputeTimeWeightedMaxUptime(groupResults);
+            var maxBoss = ComputeTimeWeightedMaxUptime(groupResults.Where(g => bossFightIds.Contains(g.FightId)).ToList());
+            var maxTrash = ComputeTimeWeightedMaxUptime(groupResults.Where(g => !bossFightIds.Contains(g.FightId)).ToList());
+            Console.WriteLine($"{label} (max, any group member covered): Overall {maxOverall:0.#}%, Boss {maxBoss:0.#}%, Trash {maxTrash:0.#}%");
         }
 
         // Time-weighted (total covered ms / total eligible ms) rather than an average of per-fight
         // percentages, so a handful of short fights can't skew the number.
         private static double ComputeTimeWeightedUptime(List<WindfuryPlayerFightResult> results)
+        {
+            if (results.Count == 0) return 0;
+
+            long coveredMs = results.Sum(r => r.CoveredMs);
+            long totalMs = results.Sum(r => r.FightDurationMs);
+            return totalMs == 0 ? 0 : (100.0 * coveredMs / totalMs);
+        }
+
+        // Same time-weighted formula as ComputeTimeWeightedUptime, but over one entry per (shaman,
+        // fight) instead of one per (shaman, player, fight) -- since WindfuryGroupFightResult is
+        // already one value per group per fight, this naturally normalizes by fight count rather
+        // than by how many eligible players happened to be in each group.
+        private static double ComputeTimeWeightedMaxUptime(List<WindfuryGroupFightResult> results)
         {
             if (results.Count == 0) return 0;
 
