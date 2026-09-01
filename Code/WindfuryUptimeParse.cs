@@ -372,28 +372,6 @@ namespace NaturesSwiftnessParse
             return eventsByFight;
         }
 
-        // Minimal union-find over actor ids, used to cluster players into inferred 5-man parties.
-        private class UnionFind
-        {
-            private readonly Dictionary<int, int> _parent = new Dictionary<int, int>();
-
-            private int Find(int x)
-            {
-                if (!_parent.ContainsKey(x)) _parent[x] = x;
-                if (_parent[x] != x) _parent[x] = Find(_parent[x]);
-                return _parent[x];
-            }
-
-            public void Union(int a, int b)
-            {
-                int rootA = Find(a);
-                int rootB = Find(b);
-                if (rootA != rootB) _parent[rootA] = rootB;
-            }
-
-            public int GroupOf(int x) => Find(x);
-        }
-
         // A vanilla party is capped at 5, so a "full" inferred group is the shaman plus 4 others.
         private const int FULL_PARTY_SIZE = 5;
 
@@ -463,41 +441,127 @@ namespace NaturesSwiftnessParse
         }
 
         // Infers 5-man party membership from party-restricted buffs (see PartyBuffAbilityIds):
-        // when one of them applies to several players at the exact same timestamp, that's one
-        // cast hitting up to 5 party members at once, so they get unioned together. Pets can tag
-        // along in the same batch as their owner without counting against that cap. A batch that
-        // hits more than 5 *player* targets can't be a single party-restricted cast (a party is
-        // capped at 5) -- most likely two different casters' buffs landing on the same tick -- so
-        // it's skipped rather than risking an incorrect merge.
+        // when one of them applies to several players at the exact same timestamp *from the same
+        // caster*, that's one cast hitting up to 5 party members at once.
+        //
+        // This used to be a blind, order-independent union-find over all such batches report-wide
+        // -- but confirmed against a real report (x1nhpR2mrYzcwMk7), that eventually welds every
+        // real party in the raid into one blob: it only takes one batch, anywhere in the whole
+        // night, that happens to touch two already-known-distinct real parties (e.g. after a raid
+        // regroup, or simply because someone drifted into another party's buff range) for their
+        // *entire* histories to be merged forever, since a union-find can't un-merge.
+        //
+        // Instead, each player has at most one *current* group, established and updated as
+        // evidence arrives in chronological (Timestamp) order -- a party we've inferred is treated
+        // as true until a later batch clearly proves it stale, rather than every batch being
+        // treated as equally authoritative regardless of when it happened:
+        //   - A batch touching no already-grouped player starts a brand new group.
+        //   - A batch touching players from exactly one existing group extends that group with any
+        //     ungrouped targets -- the common case, for a party that's stayed together.
+        //   - A batch touching players from two or more existing groups means someone's tracked
+        //     group is stale: whichever existing group has the most of this batch's players wins,
+        //     and every other batch member (whether previously untracked or tagged to a losing
+        //     group) is (re)assigned to it. A tie has no majority to trust, so it's skipped rather
+        //     than guessing.
+        // It's not required (or expected) that every player lands in a group from the very first
+        // fight that mentions them -- groups just keep accreting/correcting as more fights are
+        // processed; whatever's been inferred so far is used as-is by the caller.
+        //
+        // A batch that hits more than 5 *player* targets can't be a single party-restricted cast (a
+        // party is capped at 5), so it's skipped up front rather than feeding it into the above at
+        // all. Pets can tag along in a batch without counting against that cap.
         private static Dictionary<int, int> InferPartyGroups(RaidReport raidReport, List<EventRow> partyBuffEvents)
         {
-            var unionFind = new UnionFind();
+            bool traceUnions = Environment.GetEnvironmentVariable("WF_DEBUG_UNION") == "1";
 
-            var byAbilityAndTime = partyBuffEvents
-                .Where(e => e.TargetID.HasValue && e.AbilityGameID.HasValue)
-                .GroupBy(e => (e.AbilityGameID.Value, e.Timestamp));
+            var groupOf = new Dictionary<int, int>();
+            int nextGroupId = 0;
 
-            foreach (var batch in byAbilityAndTime)
+            // OrderBy is a stable sort and GroupBy preserves first-encountered key order over an
+            // already-ordered source, so batches below are visited in ascending Timestamp order --
+            // i.e. chronologically, regardless of what order the caller accumulated fights in.
+            var byAbilityTimeAndSource = partyBuffEvents
+                .Where(e => e.TargetID.HasValue && e.AbilityGameID.HasValue && e.SourceID.HasValue)
+                .OrderBy(e => e.Timestamp)
+                .GroupBy(e => (e.AbilityGameID.Value, e.Timestamp, e.SourceID.Value));
+
+            foreach (var batch in byAbilityTimeAndSource)
             {
                 var targets = batch.Select(e => e.TargetID.Value).Distinct().ToList();
                 var playerTargetCount = targets.Count(id => raidReport.GetActorType(id) == "Player");
                 if (playerTargetCount > 5)
                 {
-                    Console.WriteLine($"DEBUG: ability {batch.Key.Item1} hit {playerTargetCount} player targets at the same instant (> 5, a party's max size) -- skipping this batch for group inference.");
+                    Console.WriteLine($"DEBUG: ability {batch.Key.Item1} cast by source {batch.Key.Item3} hit {playerTargetCount} player targets at the same instant (> 5, a party's max size) -- skipping this batch for group inference.");
                     continue;
                 }
 
-                for (int i = 1; i < targets.Count; i++)
+                // Tally how many of this batch's targets are already tagged to each existing group.
+                var groupCounts = new Dictionary<int, int>();
+                foreach (var id in targets)
                 {
-                    unionFind.Union(targets[0], targets[i]);
+                    if (groupOf.TryGetValue(id, out var g))
+                    {
+                        groupCounts[g] = groupCounts.TryGetValue(g, out var c) ? c + 1 : 1;
+                    }
+                }
+
+                int winningGroup;
+                if (groupCounts.Count == 0)
+                {
+                    winningGroup = nextGroupId++;
+                }
+                else if (groupCounts.Count == 1)
+                {
+                    winningGroup = groupCounts.Keys.First();
+                }
+                else
+                {
+                    var ranked = groupCounts.OrderByDescending(kv => kv.Value).ToList();
+                    if (ranked[0].Value == ranked[1].Value)
+                    {
+                        if (traceUnions)
+                        {
+                            var sourceName = raidReport.GetActor(batch.Key.Item3);
+                            Console.WriteLine($"UNIONTRACE: ability={batch.Key.Item1} ts={batch.Key.Item2} source={sourceName}({batch.Key.Item3}) -- ambiguous batch ties between groups [{string.Join(", ", ranked.Select(kv => kv.Key))}], skipping.");
+                        }
+                        continue;
+                    }
+                    winningGroup = ranked[0].Key;
+                }
+
+                // The per-batch instantaneous check above (>5 targets at once) only catches an
+                // impossible SINGLE cast -- it doesn't stop a group from growing past 5 real
+                // members one batch at a time as sticky expansions and majority-wins accumulate
+                // (confirmed against report x1nhpR2mrYzcwMk7: this is exactly how a real shaman's
+                // own party -- Melior's -- silently absorbed into another shaman's group despite
+                // never once losing a single-batch majority vote by more than a member or two).
+                // So before committing, check what the winning group's real-player membership
+                // would become if this batch's targets join it; a party is capped at 5, so a
+                // projected overflow means this batch's evidence conflicts with the group as
+                // currently understood -- skip it rather than let the group overflow.
+                var projectedMembers = new HashSet<int>(groupOf.Where(kv => kv.Value == winningGroup).Select(kv => kv.Key));
+                foreach (var id in targets) projectedMembers.Add(id);
+                int projectedRealSize = projectedMembers.Count(id => raidReport.GetActorType(id) == "Player");
+                if (projectedRealSize > FULL_PARTY_SIZE)
+                {
+                    if (traceUnions)
+                    {
+                        var sourceName = raidReport.GetActor(batch.Key.Item3);
+                        Console.WriteLine($"UNIONTRACE: ability={batch.Key.Item1} ts={batch.Key.Item2} source={sourceName}({batch.Key.Item3}) -- joining group {winningGroup} would grow it to {projectedRealSize} real player(s) (> {FULL_PARTY_SIZE}), skipping.");
+                    }
+                    continue;
+                }
+
+                foreach (var id in targets)
+                {
+                    if (traceUnions && groupOf.TryGetValue(id, out var previousGroup) && previousGroup != winningGroup)
+                    {
+                        Console.WriteLine($"UNIONTRACE: ability={batch.Key.Item1} ts={batch.Key.Item2} source={raidReport.GetActor(batch.Key.Item3)}({batch.Key.Item3}) -- reassigning {raidReport.GetActor(id)} from group {previousGroup} to {winningGroup} (contradicting evidence)");
+                    }
+                    groupOf[id] = winningGroup;
                 }
             }
 
-            var groupOf = new Dictionary<int, int>();
-            foreach (var actorId in partyBuffEvents.Where(e => e.TargetID.HasValue).Select(e => e.TargetID.Value).Distinct())
-            {
-                groupOf[actorId] = unionFind.GroupOf(actorId);
-            }
             return groupOf;
         }
 
