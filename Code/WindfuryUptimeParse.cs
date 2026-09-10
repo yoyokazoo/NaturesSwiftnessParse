@@ -1085,6 +1085,15 @@ namespace NaturesSwiftnessParse
             var bossTwistingEfficiency = ComputeTwistingEfficiency(groupResults.Where(g => bossFightIds.Contains(g.FightId)).ToList());
             var trashTwistingEfficiency = ComputeTwistingEfficiency(groupResults.Where(g => !bossFightIds.Contains(g.FightId)).ToList());
             Console.WriteLine($"{label} Twisting Efficiency: Overall {twistingEfficiency:0.#}%, Boss {bossTwistingEfficiency:0.#}%, Trash {trashTwistingEfficiency:0.#}%");
+
+            // The final total, over twisted fights only (WasTwisted -- Grace of Air Totem cast at
+            // least once): a fight where the shaman never touched Grace of Air isn't a twisting
+            // attempt at all, so including it (as a 0% / 0s data point) would just be noise, not a
+            // real reflection of how well they twist when they do.
+            var twistedFights = groupResults.Where(g => g.WasTwisted).ToList();
+            var avgEfficiency = twistedFights.Count == 0 ? 0 : twistedFights.Average(g => g.TwistingEfficiencyPercent);
+            var avgLossSeconds = twistedFights.Count == 0 ? 0 : twistedFights.Average(g => g.TwistingWindfuryLossMs / 1000.0);
+            Console.WriteLine($"{label} Twisted Fights: {twistedFights.Count}, Avg Efficiency {avgEfficiency:0.#}%, Avg Twisting Windfury Loss {avgLossSeconds:0.#}s");
         }
 
         // Time-weighted (total captured ms / total available ms), same reasoning as

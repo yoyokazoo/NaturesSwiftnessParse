@@ -47,6 +47,10 @@ namespace NaturesSwiftnessParse
 
         public double MaxUptimePercent => FightDurationMs == 0 ? 0 : (100.0 * CoveredMs / FightDurationMs);
         public double TwistingEfficiencyPercent => TwistingGraceOfAirAvailableMs == 0 ? 0 : (100.0 * TwistingGraceOfAirActualMs / TwistingGraceOfAirAvailableMs);
+        // Whether the shaman cast Grace of Air Totem at all this fight -- used to exclude fights
+        // where they never attempted to twist from the "twisted fights" aggregate (see
+        // WindfuryUptimeParse.PrintTwistedFightsSummary), rather than letting them drag it toward 0.
+        public bool WasTwisted => RawTwistingCasts.Any(c => !c.IsWindfuryCast);
 
         public WindfuryGroupFightResult(int fightId, int shamanActorId, string shamanName, List<TotemBuffEvent> unionIntervals, int memberCount, long fightDurationMs,
             long twistingWindfuryLossMs = 0, List<(long Timestamp, bool IsWindfuryCast)> rawTwistingCasts = null, List<(long Start, long End)> twistingLossIntervals = null, long fightStartTime = 0,
