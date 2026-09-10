@@ -305,6 +305,37 @@ namespace NaturesSwiftnessParse
             return await QueryWarcraftLogs(payload);
         }
 
+        public const int CAST_EVENT_QUERY_LIMIT = 250;
+        // Paginated single-fight cast query, unlike QueryForAbilityCastEvents above (which spans
+        // multiple fights but doesn't page) -- needed for totem-twisting tracking, where a shaman can
+        // rack up many casts of the same ability in one fight.
+        public static async Task<string> QueryForCastEventsForFight(string reportId, int fightId, long startTime, long endTime, int abilityId)
+        {
+            var query = $@"
+            {{
+              reportData {{
+                report(code: ""{reportId}"") {{
+                  events(
+                    dataType: Casts
+                    abilityID: {abilityId}
+                    fightIDs: [{fightId}]
+                    startTime: {startTime}
+                    endTime: {endTime}
+                    limit: {CAST_EVENT_QUERY_LIMIT}
+                  ) {{
+                    data
+                    nextPageTimestamp
+                  }}
+                }}
+              }}
+            }}
+            ";
+
+            var payload = JsonSerializer.Serialize(new { query });
+
+            return await QueryWarcraftLogs(payload);
+        }
+
         public const int HEALING_EVENT_QUERY_LIMIT = 250;
         public static async Task<string> QueryForHealingEvents(string reportId, int fightId, long startTime, long endTime)
         {
