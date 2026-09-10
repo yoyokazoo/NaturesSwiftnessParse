@@ -379,26 +379,36 @@ namespace NaturesSwiftnessParse
         }
 
         public const int CAST_EVENT_QUERY_LIMIT = 250;
-        // Paginated single-fight cast query, unlike QueryForAbilityCastEvents above (which spans
-        // multiple fights but doesn't page) -- needed for totem-twisting tracking, where a shaman can
-        // rack up many casts of the same ability in one fight.
-        public static async Task<string> QueryForCastEventsForFight(string reportId, int fightId, long startTime, long endTime, int abilityId)
+
+        // Combines events queries for multiple abilities into a single GraphQL request via aliased
+        // fields (a0, a1, ...) instead of one HTTP request per ability. WCL's points cost is the same
+        // either way -- it's driven by how much data each sub-query resolves server-side, not by how
+        // many HTTP requests it's split across -- but this cuts round trips and reduces exposure to
+        // WCL's burst rate limiting (a separate thing from the points quota; see QueryWarcraftLogs).
+        // Pagination is still per-ability (each can have more events than fit in one page
+        // independently of the others), so abilityIds here is sometimes just one ability being paged
+        // through individually after an initial batch -- see WindfuryUptimeParse.GetBatchedEventsForFight.
+        public static async Task<string> QueryForBatchedEventsForFight(string reportId, int fightId, long startTime, long endTime, string dataType, IReadOnlyList<int> abilityIds, bool includeResources, int limit)
         {
+            var fields = string.Join("\n", abilityIds.Select((abilityId, index) => $@"
+                  a{index}: events(
+                    dataType: {dataType}
+                    abilityID: {abilityId}
+                    fightIDs: [{fightId}]
+                    includeResources: {(includeResources ? "true" : "false")}
+                    startTime: {startTime}
+                    endTime: {endTime}
+                    limit: {limit}
+                  ) {{
+                    data
+                    nextPageTimestamp
+                  }}"));
+
             var query = $@"
             {{
               reportData {{
                 report(code: ""{reportId}"") {{
-                  events(
-                    dataType: Casts
-                    abilityID: {abilityId}
-                    fightIDs: [{fightId}]
-                    startTime: {startTime}
-                    endTime: {endTime}
-                    limit: {CAST_EVENT_QUERY_LIMIT}
-                  ) {{
-                    data
-                    nextPageTimestamp
-                  }}
+{fields}
                 }}
               }}
             }}

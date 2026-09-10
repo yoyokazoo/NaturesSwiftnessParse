@@ -33,6 +33,12 @@ public class Report
 
     [JsonPropertyName("masterData")]
     public MasterDataActors MasterData { get; set; } = null;
+
+    // Catches aliased events(...) fields (a0, a1, ...) from a batched multi-ability query -- see
+    // WarcraftLogsQuery.QueryForBatchedEventsForFight -- since those don't match the single named
+    // "events" property above.
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement> Extra { get; set; }
 }
 
 public sealed class MasterDataActors

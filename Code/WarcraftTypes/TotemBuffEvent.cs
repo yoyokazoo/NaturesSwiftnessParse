@@ -17,15 +17,16 @@ namespace NaturesSwiftnessParse
         // excluded.
         public static readonly HashSet<int> WINDFURY_TOTEM_ENCHANT_IDS = new HashSet<int> { 1783, 563, 564, 2638, 2639 };
 
-        // Cast/summon ids for Windfury Totem and Grace of Air Totem (all ranks) -- distinct from
+        // Cast/summon ids for Windfury Totem and Grace of Air Totem -- distinct from
         // WINDFURY_ABILITY_ID, which is the applied weapon-enchant/buff id, not the cast id (totems
         // generally use a different spell entry for the cast than for the buff/aura they grant).
         // Used for twisting-loss tracking (see WindfuryUptimeParse.ComputeTwistingWindfuryLossMs),
-        // which cares only about which totem occupies the Air slot at a given moment -- any rank of
-        // either spell displaces the other, so all ranks matter here even though only the highest
-        // ranks would matter for buff magnitude.
-        public static readonly int[] WINDFURY_TOTEM_CAST_ABILITY_IDS = { 8512, 10613, 10614 }; // Rank 1, 2, 3
-        public static readonly int[] GRACE_OF_AIR_TOTEM_CAST_ABILITY_IDS = { 8835, 10627, 25359 }; // Rank 1, 2, 3
+        // which cares only about which totem occupies the Air slot at a given moment. Only the ranks
+        // an actual level-60 raider would use are tracked -- rank 3 Windfury Totem (the only rank
+        // worth casting once available), and ranks 2-3 Grace of Air Totem (rank 1's bonus is small
+        // enough nobody raiding twists with it).
+        public static readonly int[] WINDFURY_TOTEM_CAST_ABILITY_IDS = { 10614 }; // Rank 3
+        public static readonly int[] GRACE_OF_AIR_TOTEM_CAST_ABILITY_IDS = { 10627, 25359 }; // Rank 2, 3
 
         // Shared global cooldown: after casting a totem, nothing else can be cast for 1.5s. Used by
         // Twisting Efficiency (see WindfuryUptimeParse.ComputeTwistingStats) to know how much of each

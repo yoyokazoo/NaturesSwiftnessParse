@@ -174,78 +174,84 @@ namespace NaturesSwiftnessParse
             return buffRoots;
         }
 
-        // All party-buff ability ranks for a single fight, fetched in parallel.
-        private static async Task<List<(int AbilityId, List<ReportDataRoot> Roots)>> GetPartyBuffEventsForFight(RaidReport raidReport, string reportId, int fightId)
+        // All party-buff ability ranks for a single fight, fetched as one batched request (see
+        // GetBatchedEventsForFight) rather than one HTTP request per rank. Already filtered to the
+        // (re)application events group inference cares about.
+        private static async Task<List<EventRow>> GetPartyBuffEventsForFight(RaidReport raidReport, string reportId, int fightId)
         {
-            var tasks = PartyBuffAbilityIds.Select(async abilityId =>
-            {
-                var (_, _, roots) = await GetPartyBuffEventsForFightAndAbility(raidReport, reportId, fightId, abilityId);
-                return (abilityId, roots);
-            });
-
-            return (await Task.WhenAll(tasks)).ToList();
-        }
-
-        private static async Task<(int FightId, int AbilityId, List<ReportDataRoot> Roots)> GetPartyBuffEventsForFightAndAbility(RaidReport raidReport, string reportId, int fightId, int abilityId)
-        {
-            long nextPageTimestamp = 0;
-            var endTime = raidReport.GetFight(fightId).EndTime;
-            List<ReportDataRoot> roots = new List<ReportDataRoot>();
-
-            do
-            {
-                var buffJson = await WarcraftLogsQuery.QueryForBuffEvents(reportId, fightId, nextPageTimestamp, endTime, abilityId);
-                var buffRoot = JsonSerializer.Deserialize<ReportDataRoot>(buffJson);
-                roots.Add(buffRoot);
-                nextPageTimestamp = buffRoot.Data.ReportData.Report.Events.NextPageTimestamp ?? 0;
-            }
-            while (nextPageTimestamp != 0);
-
-            return (fightId, abilityId, roots);
+            var events = await GetBatchedEventsForFight(raidReport, reportId, fightId, "Buffs", PartyBuffAbilityIds, includeResources: true, limit: WarcraftLogsQuery.BUFF_EVENT_QUERY_LIMIT);
+            return events.Where(row => row.Type == "applybuff" || row.Type == "refreshbuff").ToList();
         }
 
         // ----- Twisting-loss cast event fetching -----
 
-        private static async Task<List<ReportDataRoot>> GetCastEventsForFightAndAbility(RaidReport raidReport, string reportId, int fightId, int abilityId)
-        {
-            long nextPageTimestamp = 0;
-            var endTime = raidReport.GetFight(fightId).EndTime;
-            List<ReportDataRoot> roots = new List<ReportDataRoot>();
-
-            do
-            {
-                var json = await WarcraftLogsQuery.QueryForCastEventsForFight(reportId, fightId, nextPageTimestamp, endTime, abilityId);
-                var root = JsonSerializer.Deserialize<ReportDataRoot>(json);
-                roots.Add(root);
-                nextPageTimestamp = root.Data.ReportData.Report.Events.NextPageTimestamp ?? 0;
-            }
-            while (nextPageTimestamp != 0);
-
-            return roots;
-        }
-
-        // Windfury Totem + Grace of Air Totem casts (all ranks of both), fetched per fight -- who
-        // cast them (SourceID) and when is all ComputeTwistingWindfuryLossMs needs; which rank isn't
-        // tracked, since any rank of either spell displaces the other from the Air totem slot.
+        // Windfury Totem + Grace of Air Totem casts, fetched per fight as one batched request (see
+        // GetBatchedEventsForFight) -- who cast them (SourceID) and when is all
+        // ComputeTwistingWindfuryLossMs needs.
         private static async Task<List<(int FightId, List<EventRow> Events)>> GetTwistingCastEvents(RaidReport raidReport, string reportId, List<int> allFightIds)
         {
             var abilityIds = TotemBuffEvent.WINDFURY_TOTEM_CAST_ABILITY_IDS.Concat(TotemBuffEvent.GRACE_OF_AIR_TOTEM_CAST_ABILITY_IDS).ToList();
 
             var tasks = allFightIds.Select(async fightId =>
             {
-                var abilityTasks = abilityIds.Select(async abilityId =>
-                {
-                    var roots = await GetCastEventsForFightAndAbility(raidReport, reportId, fightId, abilityId);
-                    return roots
-                        .SelectMany(root => root?.Data?.ReportData?.Report?.Events?.Data ?? new List<EventRow>())
-                        .Where(row => row.Type == "cast");
-                });
-
-                var events = (await Task.WhenAll(abilityTasks)).SelectMany(e => e).ToList();
-                return (fightId, events);
+                var events = await GetBatchedEventsForFight(raidReport, reportId, fightId, "Casts", abilityIds, includeResources: false, limit: WarcraftLogsQuery.CAST_EVENT_QUERY_LIMIT);
+                return (fightId, events.Where(row => row.Type == "cast").ToList());
             });
 
             return (await Task.WhenAll(tasks)).ToList();
+        }
+
+        // Fetches events for multiple abilities in a single fight as one batched GraphQL request
+        // (aliased a0, a1, ... sub-queries -- see WarcraftLogsQuery.QueryForBatchedEventsForFight)
+        // instead of one HTTP request per ability. Pagination is still per-ability: if a particular
+        // alias comes back with a nextPageTimestamp (more events for that ability than fit in one
+        // page), it's finished off with its own follow-up requests rather than trying to share one
+        // cursor across abilities that may have differently-paced event streams -- rare in practice
+        // (totem casts/party buffs are low-volume per ability per fight) but handled for correctness.
+        private static async Task<List<EventRow>> GetBatchedEventsForFight(RaidReport raidReport, string reportId, int fightId, string dataType, IReadOnlyList<int> abilityIds, bool includeResources, int limit)
+        {
+            if (abilityIds.Count == 0) return new List<EventRow>();
+
+            var endTime = raidReport.GetFight(fightId).EndTime;
+            var events = new List<EventRow>();
+
+            var json = await WarcraftLogsQuery.QueryForBatchedEventsForFight(reportId, fightId, 0, endTime, dataType, abilityIds, includeResources, limit);
+            var pages = ParseBatchedEventsResponse(json, abilityIds.Count);
+
+            for (int i = 0; i < abilityIds.Count; i++)
+            {
+                var page = pages[i];
+                if (page?.Data != null) events.AddRange(page.Data);
+
+                var nextPageTimestamp = page?.NextPageTimestamp ?? 0;
+                while (nextPageTimestamp != 0)
+                {
+                    var pageJson = await WarcraftLogsQuery.QueryForBatchedEventsForFight(reportId, fightId, nextPageTimestamp, endTime, dataType, new List<int> { abilityIds[i] }, includeResources, limit);
+                    var page2 = ParseBatchedEventsResponse(pageJson, 1)[0];
+                    if (page2?.Data != null) events.AddRange(page2.Data);
+                    nextPageTimestamp = page2?.NextPageTimestamp ?? 0;
+                }
+            }
+
+            return events;
+        }
+
+        // Pulls the aliased a0, a1, ... events(...) sub-queries back out of a batched response, in
+        // the same order abilityIds was passed in -- null for any index a malformed/missing response
+        // didn't include.
+        private static List<EventsPage> ParseBatchedEventsResponse(string json, int abilityCount)
+        {
+            var extra = JsonSerializer.Deserialize<ReportDataRoot>(json)?.Data?.ReportData?.Report?.Extra;
+
+            var pages = new List<EventsPage>();
+            for (int i = 0; i < abilityCount; i++)
+            {
+                pages.Add(extra != null && extra.TryGetValue($"a{i}", out var element)
+                    ? JsonSerializer.Deserialize<EventsPage>(element.GetRawText())
+                    : null);
+            }
+
+            return pages;
         }
 
         // ----- CombatantInfo / gear processing -----
@@ -403,34 +409,6 @@ namespace NaturesSwiftnessParse
 
         // ----- Party-buff processing / group inference -----
 
-        private static Dictionary<int, List<EventRow>> ProcessPartyBuffEvents(List<(int FightId, int AbilityId, List<ReportDataRoot> Roots)> buffResults)
-        {
-            var eventsByFight = new Dictionary<int, List<EventRow>>();
-
-            foreach (var (fightId, _, roots) in buffResults)
-            {
-                foreach (var root in roots)
-                {
-                    var rows = root?.Data?.ReportData?.Report?.Events?.Data;
-                    if (rows == null) continue;
-
-                    foreach (var row in rows)
-                    {
-                        if (row.Type != "applybuff" && row.Type != "refreshbuff") continue;
-
-                        if (!eventsByFight.TryGetValue(fightId, out var list))
-                        {
-                            list = new List<EventRow>();
-                            eventsByFight[fightId] = list;
-                        }
-                        list.Add(row);
-                    }
-                }
-            }
-
-            return eventsByFight;
-        }
-
         // A vanilla party is capped at 5, so a "full" inferred group is the shaman plus 4 others.
         private const int FULL_PARTY_SIZE = 5;
 
@@ -462,9 +440,8 @@ namespace NaturesSwiftnessParse
             foreach (var fightId in fightsToCheck)
             {
                 fightsChecked++;
-                var abilityResults = await GetPartyBuffEventsForFight(raidReport, reportId, fightId);
-                var processed = ProcessPartyBuffEvents(abilityResults.Select(r => (fightId, r.AbilityId, r.Roots)).ToList());
-                accumulatedEvents.AddRange(processed.Values.SelectMany(e => e));
+                var partyBuffEvents = await GetPartyBuffEventsForFight(raidReport, reportId, fightId);
+                accumulatedEvents.AddRange(partyBuffEvents);
 
                 groupOf = InferPartyGroups(raidReport, accumulatedEvents);
 
