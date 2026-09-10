@@ -67,7 +67,7 @@ namespace NaturesSwiftnessParse
             var windfuryEventsByFight = ProcessWindfuryBuffEvents(windfuryBuffResults);
 
             // Twisting-loss/efficiency tracking uses cast events only (Windfury Totem/Grace of Air
-            // Totem casts, any rank) -- see ComputeTwistingStats.
+            // Totem/Tranquil Air Totem casts, any tracked rank) -- see ComputeTwistingStats.
             var twistingCastResults = await GetTwistingCastEvents(raidReport, reportId, allFightIds);
             var twistingCastEventsByFight = twistingCastResults.ToDictionary(r => r.FightId, r => r.Events);
 
@@ -75,8 +75,8 @@ namespace NaturesSwiftnessParse
             {
                 var allTwistingCasts = twistingCastEventsByFight.Values.SelectMany(e => e).ToList();
                 var wfCastCount = allTwistingCasts.Count(e => e.AbilityGameID.HasValue && TotemBuffEvent.WINDFURY_TOTEM_CAST_ABILITY_IDS.Contains(e.AbilityGameID.Value));
-                var goaCastCount = allTwistingCasts.Count(e => e.AbilityGameID.HasValue && TotemBuffEvent.GRACE_OF_AIR_TOTEM_CAST_ABILITY_IDS.Contains(e.AbilityGameID.Value));
-                Console.WriteLine($"DEBUG: fetched {allTwistingCasts.Count} twisting-relevant cast(s) across {allFightIds.Count} fight(s): {wfCastCount} Windfury Totem cast(s), {goaCastCount} Grace of Air Totem cast(s).");
+                var otherAirCastCount = allTwistingCasts.Count(e => e.AbilityGameID.HasValue && TotemBuffEvent.NON_WINDFURY_AIR_TOTEM_CAST_ABILITY_IDS.Contains(e.AbilityGameID.Value));
+                Console.WriteLine($"DEBUG: fetched {allTwistingCasts.Count} twisting-relevant cast(s) across {allFightIds.Count} fight(s): {wfCastCount} Windfury Totem cast(s), {otherAirCastCount} Grace of Air/Tranquil Air Totem cast(s).");
             }
 
             bool debugGear = Environment.GetEnvironmentVariable("WF_DEBUG_GEAR") == "1";
@@ -185,12 +185,12 @@ namespace NaturesSwiftnessParse
 
         // ----- Twisting-loss cast event fetching -----
 
-        // Windfury Totem + Grace of Air Totem casts, fetched per fight as one batched request (see
-        // GetBatchedEventsForFight) -- who cast them (SourceID) and when is all
-        // ComputeTwistingWindfuryLossMs needs.
+        // Windfury Totem + the Air totems it gets twisted against (Grace of Air, Tranquil Air) casts,
+        // fetched per fight as one batched request (see GetBatchedEventsForFight) -- who cast them
+        // (SourceID) and when is all ComputeTwistingStats needs.
         private static async Task<List<(int FightId, List<EventRow> Events)>> GetTwistingCastEvents(RaidReport raidReport, string reportId, List<int> allFightIds)
         {
-            var abilityIds = TotemBuffEvent.WINDFURY_TOTEM_CAST_ABILITY_IDS.Concat(TotemBuffEvent.GRACE_OF_AIR_TOTEM_CAST_ABILITY_IDS).ToList();
+            var abilityIds = TotemBuffEvent.WINDFURY_TOTEM_CAST_ABILITY_IDS.Concat(TotemBuffEvent.NON_WINDFURY_AIR_TOTEM_CAST_ABILITY_IDS).ToList();
 
             var tasks = allFightIds.Select(async fightId =>
             {
@@ -736,7 +736,7 @@ namespace NaturesSwiftnessParse
                 fightResult.GroupResults.Add(new WindfuryGroupFightResult(
                     fightId, shamanGroup.Key.Item1, shamanGroup.Key.ShamanName, unionIntervals, shamanGroup.Count(), fightEnd - fightStart,
                     twisting.LossMs, twisting.RawCasts ?? new List<(long, bool)>(), twisting.LossIntervals ?? new List<(long, long)>(), fightStart,
-                    twisting.GraceOfAirAvailableMs, twisting.GraceOfAirActualMs, twisting.CycleTraces ?? new List<TwistingCycleTrace>()));
+                    twisting.AirTotemAvailableMs, twisting.AirTotemActualMs, twisting.CycleTraces ?? new List<TwistingCycleTrace>()));
             }
 
             if (debugGear)
@@ -769,8 +769,9 @@ namespace NaturesSwiftnessParse
                 .ToList();
         }
 
-        // One entry per shaman actor who cast Windfury Totem and/or Grace of Air Totem this fight --
-        // see ComputeTwistingStats for what's in each computation.
+        // One entry per shaman actor who cast Windfury Totem and/or one of the other Air totems
+        // (Grace of Air, Tranquil Air) this fight -- see ComputeTwistingStats for what's in each
+        // computation.
         private static Dictionary<int, TwistingStats> ComputeTwistingStatsByShaman(RaidReport raidReport, long fightEnd, List<EventRow> twistingCastEvents)
         {
             var statsByShaman = new Dictionary<int, TwistingStats>();
@@ -794,17 +795,19 @@ namespace NaturesSwiftnessParse
             public long LossMs;
             public List<(long Timestamp, bool IsWindfuryCast)> RawCasts;
             public List<(long Start, long End)> LossIntervals;
-            public long GraceOfAirAvailableMs;
-            public long GraceOfAirActualMs;
+            public long AirTotemAvailableMs;
+            public long AirTotemActualMs;
             public List<TwistingCycleTrace> CycleTraces;
         }
 
-        // Twisting: a shaman alternates Windfury Totem and Grace of Air Totem casts to get the
-        // benefit of both. Windfury's buff (a temporary weapon enchant) persists ~10s from each
-        // (re)application regardless of what totem is currently down -- that's what makes twisting
-        // possible: swapping to Grace of Air doesn't immediately strip Windfury, it just stops it
-        // from being refreshed. Per "only use casts to determine this", both metrics below work off
-        // cast events alone, not applied-buff events.
+        // Twisting: a shaman alternates Windfury Totem and another Air totem -- Grace of Air Totem or
+        // Tranquil Air Totem (see TotemBuffEvent.NON_WINDFURY_AIR_TOTEM_CAST_ABILITY_IDS; treated
+        // identically here, since either displaces Windfury Totem from the Air slot the same way) --
+        // to get the benefit of both. Windfury's buff (a temporary weapon enchant) persists ~10s from
+        // each (re)application regardless of what totem is currently down -- that's what makes
+        // twisting possible: swapping away from Windfury doesn't immediately strip it, it just stops
+        // it from being refreshed. Per "only use casts to determine this", both metrics below work
+        // off cast events alone, not applied-buff events.
         //
         // Both metrics are computed over the same "cycles" -- the span from one Windfury Totem cast
         // to the next (or, for the last cast seen, to the end of the fight) -- starting from the
@@ -814,25 +817,25 @@ namespace NaturesSwiftnessParse
         //
         // - Twisting Windfury Loss: if the shaman doesn't re-cast Windfury Totem before its 10s
         //   buff runs out, the group loses Windfury until it's recast -- but only counted as
-        //   "twisting" loss when a Grace of Air Totem cast happened since the last Windfury cast; a
-        //   shaman who simply doesn't keep Windfury Totem up (or never touches Grace of Air) isn't
+        //   "twisting" loss when the other Air totem was cast since the last Windfury cast; a shaman
+        //   who simply doesn't keep Windfury Totem up (or never touches the other totem) isn't
         //   twisting, so their gaps aren't attributed here.
-        // - Twisting Efficiency: of the Grace of Air uptime that was theoretically available each
+        // - Twisting Efficiency: of the other totem's uptime that was theoretically available each
         //   cycle, how much did the shaman actually capture? The 1.5s global cooldown after casting
-        //   Windfury Totem means Grace of Air can't be dropped immediately, so only 10s - 1.5s = 8.5s
-        //   of each cycle is ever available (clipped to fight end for a trailing cycle); actual
-        //   capture runs from whenever Grace of Air was cast that cycle (if at all) until the totem
-        //   gets swapped again (the next Windfury cast) or the fight ends, intersected with that 8.5s
-        //   window -- so casting Grace of Air late, or re-casting Windfury Totem before the window's
-        //   natural end, both show up as missed seconds.
+        //   Windfury Totem means it can't be dropped immediately, so only 10s - 1.5s = 8.5s of each
+        //   cycle is ever available (clipped to fight end for a trailing cycle); actual capture runs
+        //   from whenever the other totem was cast that cycle (if at all) until the totem gets
+        //   swapped again (the next Windfury cast) or the fight ends, intersected with that 8.5s
+        //   window -- so casting it late, or re-casting Windfury Totem before the window's natural
+        //   end, both show up as missed seconds.
         private static TwistingStats ComputeTwistingStats(long fightEnd, List<EventRow> castEventsForShaman)
         {
             var rawCasts = new List<(long Timestamp, bool IsWindfuryCast)>();
             foreach (var evt in castEventsForShaman)
             {
                 bool isWindfuryCast = evt.AbilityGameID.HasValue && TotemBuffEvent.WINDFURY_TOTEM_CAST_ABILITY_IDS.Contains(evt.AbilityGameID.Value);
-                bool isGraceOfAirCast = evt.AbilityGameID.HasValue && TotemBuffEvent.GRACE_OF_AIR_TOTEM_CAST_ABILITY_IDS.Contains(evt.AbilityGameID.Value);
-                if (!isWindfuryCast && !isGraceOfAirCast) continue;
+                bool isOtherAirTotemCast = evt.AbilityGameID.HasValue && TotemBuffEvent.NON_WINDFURY_AIR_TOTEM_CAST_ABILITY_IDS.Contains(evt.AbilityGameID.Value);
+                if (!isWindfuryCast && !isOtherAirTotemCast) continue;
 
                 rawCasts.Add((evt.Timestamp, isWindfuryCast));
             }
@@ -848,16 +851,16 @@ namespace NaturesSwiftnessParse
                 long cycleStart = windfuryCastTimes[i];
                 long cycleEnd = i + 1 < windfuryCastTimes.Count ? windfuryCastTimes[i + 1] : fightEnd;
 
-                // First Grace of Air cast strictly within this cycle -- later ones in the same cycle
-                // don't matter, Grace of Air is already down.
-                long? goaCastTime = rawCasts
+                // First cast of the other Air totem strictly within this cycle -- later ones in the
+                // same cycle don't matter, it's already down.
+                long? otherAirTotemCastTime = rawCasts
                     .Where(c => !c.IsWindfuryCast && c.Timestamp > cycleStart && c.Timestamp < cycleEnd)
                     .Select(c => (long?)c.Timestamp)
                     .Min(); // null (not an exception) when there's no such element -- Min() over a nullable-typed sequence handles empty gracefully
 
                 // ----- Twisting Windfury Loss -----
                 long windfuryExpiresAt = cycleStart + TotemBuffEvent.WINDFURY_BUFF_DURATION_MS;
-                if (goaCastTime.HasValue && cycleEnd > windfuryExpiresAt)
+                if (otherAirTotemCastTime.HasValue && cycleEnd > windfuryExpiresAt)
                 {
                     lossMs += cycleEnd - windfuryExpiresAt;
                     lossIntervals.Add((windfuryExpiresAt, cycleEnd));
@@ -870,10 +873,10 @@ namespace NaturesSwiftnessParse
 
                 long? capturedStart = null, capturedEnd = null;
                 long cycleActualMs = 0;
-                if (goaCastTime.HasValue)
+                if (otherAirTotemCastTime.HasValue)
                 {
-                    long overlapStart = Math.Max(goaCastTime.Value, windowStart);
-                    long overlapEnd = Math.Min(cycleEnd, windowEnd); // Grace of Air stays down until swapped back (next Windfury cast) or the fight ends
+                    long overlapStart = Math.Max(otherAirTotemCastTime.Value, windowStart);
+                    long overlapEnd = Math.Min(cycleEnd, windowEnd); // stays down until swapped back (next Windfury cast) or the fight ends
                     if (overlapEnd > overlapStart)
                     {
                         capturedStart = overlapStart;
@@ -884,7 +887,7 @@ namespace NaturesSwiftnessParse
 
                 availableMs += cycleAvailableMs;
                 actualMs += cycleActualMs;
-                cycleTraces.Add(new TwistingCycleTrace(windowStart, windowEnd, goaCastTime, capturedStart, capturedEnd, cycleAvailableMs, cycleActualMs));
+                cycleTraces.Add(new TwistingCycleTrace(windowStart, windowEnd, otherAirTotemCastTime, capturedStart, capturedEnd, cycleAvailableMs, cycleActualMs));
             }
 
             return new TwistingStats
@@ -892,8 +895,8 @@ namespace NaturesSwiftnessParse
                 LossMs = lossMs,
                 RawCasts = rawCasts,
                 LossIntervals = lossIntervals,
-                GraceOfAirAvailableMs = availableMs,
-                GraceOfAirActualMs = actualMs,
+                AirTotemAvailableMs = availableMs,
+                AirTotemActualMs = actualMs,
                 CycleTraces = cycleTraces
             };
         }
@@ -1049,24 +1052,25 @@ namespace NaturesSwiftnessParse
             Console.WriteLine($"{label} (max, any group member covered): Overall {maxOverall:0.#}%, Boss {maxBoss:0.#}%, Trash {maxTrash:0.#}%");
 
             // Most shamans don't twist at all, so this is 0 for most -- only non-zero when the shaman
-            // cast Grace of Air Totem and failed to re-cast Windfury Totem within its 10s grace period.
+            // cast Grace of Air Totem or Tranquil Air Totem and failed to re-cast Windfury Totem
+            // within its 10s grace period.
             long totalLossMs = groupResults.Sum(g => g.TwistingWindfuryLossMs);
             long bossLossMs = groupResults.Where(g => bossFightIds.Contains(g.FightId)).Sum(g => g.TwistingWindfuryLossMs);
             long trashLossMs = groupResults.Where(g => !bossFightIds.Contains(g.FightId)).Sum(g => g.TwistingWindfuryLossMs);
             Console.WriteLine($"{label} Twisting Windfury Loss: {totalLossMs / 1000.0:0.#}s total (Boss {bossLossMs / 1000.0:0.#}s, Trash {trashLossMs / 1000.0:0.#}s)");
 
-            // Of the Grace of Air uptime theoretically available (see ComputeTwistingStats), how much
-            // was actually captured. A shaman who never twists captures 0% of it, same as the loss
-            // metric being 0 for them -- this isn't conditioned on having attempted to twist.
+            // Of the other Air totem's uptime theoretically available (see ComputeTwistingStats), how
+            // much was actually captured. A shaman who never twists captures 0% of it, same as the
+            // loss metric being 0 for them -- this isn't conditioned on having attempted to twist.
             var twistingEfficiency = ComputeTwistingEfficiency(groupResults);
             var bossTwistingEfficiency = ComputeTwistingEfficiency(groupResults.Where(g => bossFightIds.Contains(g.FightId)).ToList());
             var trashTwistingEfficiency = ComputeTwistingEfficiency(groupResults.Where(g => !bossFightIds.Contains(g.FightId)).ToList());
             Console.WriteLine($"{label} Twisting Efficiency: Overall {twistingEfficiency:0.#}%, Boss {bossTwistingEfficiency:0.#}%, Trash {trashTwistingEfficiency:0.#}%");
 
-            // The final total, over twisted fights only (WasTwisted -- Grace of Air Totem cast at
-            // least once): a fight where the shaman never touched Grace of Air isn't a twisting
-            // attempt at all, so including it (as a 0% / 0s data point) would just be noise, not a
-            // real reflection of how well they twist when they do.
+            // The final total, over twisted fights only (WasTwisted -- Grace of Air Totem or Tranquil
+            // Air Totem cast at least once): a fight where the shaman never touched either isn't a
+            // twisting attempt at all, so including it (as a 0% / 0s data point) would just be noise,
+            // not a real reflection of how well they twist when they do.
             var twistedFights = groupResults.Where(g => g.WasTwisted).ToList();
             var avgEfficiency = twistedFights.Count == 0 ? 0 : twistedFights.Average(g => g.TwistingEfficiencyPercent);
             var avgLossSeconds = twistedFights.Count == 0 ? 0 : twistedFights.Average(g => g.TwistingWindfuryLossMs / 1000.0);
@@ -1080,8 +1084,8 @@ namespace NaturesSwiftnessParse
         {
             if (results.Count == 0) return 0;
 
-            long availableMs = results.Sum(r => r.TwistingGraceOfAirAvailableMs);
-            long actualMs = results.Sum(r => r.TwistingGraceOfAirActualMs);
+            long availableMs = results.Sum(r => r.TwistingAirTotemAvailableMs);
+            long actualMs = results.Sum(r => r.TwistingAirTotemActualMs);
             return availableMs == 0 ? 0 : (100.0 * actualMs / availableMs);
         }
 

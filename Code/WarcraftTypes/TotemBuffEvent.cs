@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.Linq;
 
 namespace NaturesSwiftnessParse
 {
@@ -17,21 +18,29 @@ namespace NaturesSwiftnessParse
         // excluded.
         public static readonly HashSet<int> WINDFURY_TOTEM_ENCHANT_IDS = new HashSet<int> { 1783, 563, 564, 2638, 2639 };
 
-        // Cast/summon ids for Windfury Totem and Grace of Air Totem -- distinct from
-        // WINDFURY_ABILITY_ID, which is the applied weapon-enchant/buff id, not the cast id (totems
-        // generally use a different spell entry for the cast than for the buff/aura they grant).
-        // Used for twisting-loss tracking (see WindfuryUptimeParse.ComputeTwistingWindfuryLossMs),
-        // which cares only about which totem occupies the Air slot at a given moment. Only the ranks
-        // an actual level-60 raider would use are tracked -- rank 3 Windfury Totem (the only rank
-        // worth casting once available), and ranks 2-3 Grace of Air Totem (rank 1's bonus is small
-        // enough nobody raiding twists with it).
+        // Cast/summon ids for Windfury Totem and the Air totems shamans twist it against -- distinct
+        // from WINDFURY_ABILITY_ID, which is the applied weapon-enchant/buff id, not the cast id
+        // (totems generally use a different spell entry for the cast than for the buff/aura they
+        // grant). Used for twisting-loss/efficiency tracking (see
+        // WindfuryUptimeParse.ComputeTwistingStats), which cares only about which totem occupies the
+        // Air slot at a given moment. Only the ranks an actual level-60 raider would use are tracked
+        // -- rank 3 Windfury Totem (the only rank worth casting once available), ranks 2-3 Grace of
+        // Air Totem (rank 1's bonus is small enough nobody raiding twists with it), and Tranquil Air
+        // Totem (single rank).
         public static readonly int[] WINDFURY_TOTEM_CAST_ABILITY_IDS = { 10614 }; // Rank 3
         public static readonly int[] GRACE_OF_AIR_TOTEM_CAST_ABILITY_IDS = { 10627, 25359 }; // Rank 2, 3
+        public static readonly int[] TRANQUIL_AIR_TOTEM_CAST_ABILITY_IDS = { 25908 };
+
+        // Either totem occupies the Air slot the same way Grace of Air does -- displacing Windfury
+        // Totem when cast, and getting displaced back when Windfury Totem is recast -- so twisting
+        // tracking treats a cast of either one identically, without needing to know which.
+        public static readonly int[] NON_WINDFURY_AIR_TOTEM_CAST_ABILITY_IDS =
+            GRACE_OF_AIR_TOTEM_CAST_ABILITY_IDS.Concat(TRANQUIL_AIR_TOTEM_CAST_ABILITY_IDS).ToArray();
 
         // Shared global cooldown: after casting a totem, nothing else can be cast for 1.5s. Used by
         // Twisting Efficiency (see WindfuryUptimeParse.ComputeTwistingStats) to know how much of each
-        // 10s Windfury window is actually available for Grace of Air -- the first 1.5s after a
-        // Windfury Totem cast can't be used to drop Grace of Air, no matter how fast the shaman is.
+        // 10s Windfury window is actually available for the other Air totem -- the first 1.5s after a
+        // Windfury Totem cast can't be used to drop it, no matter how fast the shaman is.
         public const long TOTEM_GLOBAL_COOLDOWN_MS = 1500;
 
         public long StartTime { get; private set; }
