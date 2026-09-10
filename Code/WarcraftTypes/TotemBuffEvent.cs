@@ -27,6 +27,12 @@ namespace NaturesSwiftnessParse
         public static readonly int[] WINDFURY_TOTEM_CAST_ABILITY_IDS = { 8512, 10613, 10614 }; // Rank 1, 2, 3
         public static readonly int[] GRACE_OF_AIR_TOTEM_CAST_ABILITY_IDS = { 8835, 10627, 25359 }; // Rank 1, 2, 3
 
+        // Shared global cooldown: after casting a totem, nothing else can be cast for 1.5s. Used by
+        // Twisting Efficiency (see WindfuryUptimeParse.ComputeTwistingStats) to know how much of each
+        // 10s Windfury window is actually available for Grace of Air -- the first 1.5s after a
+        // Windfury Totem cast can't be used to drop Grace of Air, no matter how fast the shaman is.
+        public const long TOTEM_GLOBAL_COOLDOWN_MS = 1500;
+
         public long StartTime { get; private set; }
         public long EndTime { get; private set; }
         public int FightId { get; private set; }

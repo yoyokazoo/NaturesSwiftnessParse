@@ -97,6 +97,7 @@
     <Compile Include="Code\WarcraftTypes\TotemBuffEvent.cs" />
     <Compile Include="Code\WarcraftTypes\NaturesSwiftnessEvent.cs" />
     <Compile Include="Code\WarcraftTypes\RaidReport.cs" />
+    <Compile Include="Code\WarcraftTypes\TwistingCycleTrace.cs" />
     <Compile Include="Code\WarcraftTypes\WindfuryFightResult.cs" />
     <Compile Include="Code\WarcraftTypes\WindfuryGroupFightResult.cs" />
     <Compile Include="Code\WarcraftTypes\WindfuryPlayerFightResult.cs" />
