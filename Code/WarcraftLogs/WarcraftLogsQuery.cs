@@ -57,28 +57,75 @@ namespace NaturesSwiftnessParse
             ClientSecret = client.ClientSecret;
         }
 
+        // WCL's client-credentials tokens are long-lived (expires_in is typically on the order of a
+        // year), but this CLI is a fresh process every invocation -- without disk caching, every
+        // single run fetches a brand-new token regardless of whether the last one is still good,
+        // which is what trips the OAuth endpoint's own rate limiting on repeated runs in a short
+        // window (a separate limit from the GraphQL API's hourly points quota handled below).
+        private const string TOKEN_CACHE_FILE = "oauth_token.json";
+
+        private class CachedOAuthToken
+        {
+            public string ClientId { get; set; }
+            public string AccessToken { get; set; }
+            public DateTime ExpiresAtUtc { get; set; }
+        }
+
         // Assumes LoadClientIdAndSecret was called and succeeded before this
         private static async Task<string> GetOauthToken()
         {
             if (OAuthToken == String.Empty)
             {
-                try
-                {
-                    OAuthToken = await GetAccessToken(
-                        clientId: ClientId,
-                        clientSecret: ClientSecret
-                    );
-                }
-                catch (Exception ex)
-                {
-                    throw new Exception("Failed to obtain OAuth token.", ex);
-                }
+                OAuthToken = TryReadCachedToken() ?? await FetchAndCacheAccessToken();
             }
 
             return OAuthToken;
         }
 
-        private static async Task<string> GetAccessToken(string clientId, string clientSecret)
+        // Null on a cache miss, an expired token, or a token cached for a different ClientId (e.g.
+        // clientId/clientSecret passed in explicitly this run, differing from a previous run's) --
+        // any of those just falls through to a live fetch.
+        private static string TryReadCachedToken()
+        {
+            var cachedJson = TryReadCache(Path.Combine(CACHE_DIR, TOKEN_CACHE_FILE));
+            if (cachedJson == null) return null;
+
+            try
+            {
+                var cached = JsonSerializer.Deserialize<CachedOAuthToken>(cachedJson);
+                if (cached?.AccessToken == null || cached.ClientId != ClientId) return null;
+
+                // 5 minute safety margin so a token doesn't expire mid-request.
+                if (cached.ExpiresAtUtc <= DateTime.UtcNow.AddMinutes(5)) return null;
+
+                return cached.AccessToken;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        private static async Task<string> FetchAndCacheAccessToken()
+        {
+            string token;
+            DateTime expiresAtUtc;
+            try
+            {
+                (token, expiresAtUtc) = await GetAccessToken(ClientId, ClientSecret);
+            }
+            catch (Exception ex)
+            {
+                throw new Exception("Failed to obtain OAuth token.", ex);
+            }
+
+            var cached = new CachedOAuthToken { ClientId = ClientId, AccessToken = token, ExpiresAtUtc = expiresAtUtc };
+            WriteCache(Path.Combine(CACHE_DIR, TOKEN_CACHE_FILE), JsonSerializer.Serialize(cached));
+
+            return token;
+        }
+
+        private static async Task<(string Token, DateTime ExpiresAtUtc)> GetAccessToken(string clientId, string clientSecret)
         {
             var body = new StringContent(
                 $"grant_type=client_credentials&client_id={clientId}&client_secret={clientSecret}",
@@ -86,16 +133,42 @@ namespace NaturesSwiftnessParse
                 "application/x-www-form-urlencoded"
             );
 
-            var resp = await _client.PostAsync("https://www.warcraftlogs.com/oauth/token", body);
-            resp.EnsureSuccessStatusCode();
-            var json = await resp.Content.ReadAsStringAsync();
+            // Same 429-handling shape as QueryWarcraftLogs below -- the token endpoint can be rate
+            // limited independently of the GraphQL API itself.
+            for (int attempt = 0; ; attempt++)
+            {
+                var resp = await _client.PostAsync("https://www.warcraftlogs.com/oauth/token", body);
 
-            // Extract "access_token" from JSON
-            var token = System.Text.Json.JsonDocument.Parse(json)
-                .RootElement.GetProperty("access_token")
-                .GetString();
+                if ((int)resp.StatusCode == 429)
+                {
+                    var retryAfter = resp.Headers.RetryAfter?.Delta ?? TimeSpan.FromSeconds(Math.Pow(2, attempt + 1));
 
-            return token;
+                    if (retryAfter > MAX_AUTO_RETRY_DELAY)
+                    {
+                        throw new Exception($"WCL OAuth token endpoint rate limit hit (429) and the requested retry wait is {retryAfter.TotalMinutes:0.#} minutes. Not auto-retrying; wait and try again.");
+                    }
+
+                    if (attempt >= MAX_RATE_LIMIT_RETRIES)
+                    {
+                        throw new Exception($"WCL OAuth token endpoint rate limit hit (429) {MAX_RATE_LIMIT_RETRIES} times in a row; giving up.");
+                    }
+
+                    Console.WriteLine($"WARNING: WCL OAuth token endpoint rate limit hit (429), retrying in {retryAfter.TotalSeconds:0.#}s (attempt {attempt + 1}/{MAX_RATE_LIMIT_RETRIES})...");
+                    await Task.Delay(retryAfter);
+                    continue;
+                }
+
+                resp.EnsureSuccessStatusCode();
+                var json = await resp.Content.ReadAsStringAsync();
+                var root = JsonDocument.Parse(json).RootElement;
+
+                var token = root.GetProperty("access_token").GetString();
+                // expires_in is in seconds; fall back to a conservative 1 hour if WCL ever omits it,
+                // so a missing field just means more frequent re-fetches rather than a caching bug.
+                var expiresInSeconds = root.TryGetProperty("expires_in", out var expiresInProp) ? expiresInProp.GetInt32() : 3600;
+
+                return (token, DateTime.UtcNow.AddSeconds(expiresInSeconds));
+            }
         }
 
         // Caps how many requests are in flight at once -- callers (e.g. WindfuryUptimeParse) can
