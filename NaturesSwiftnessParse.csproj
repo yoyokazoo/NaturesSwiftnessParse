@@ -49,6 +49,7 @@
       <HintPath>packages\System.CommandLine.2.0.0-beta4.22272.1\lib\netstandard2.0\System.CommandLine.dll</HintPath>
     </Reference>
     <Reference Include="System.Core" />
+    <Reference Include="System.IO.Compression" />
     <Reference Include="System.IO.Pipelines, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
       <HintPath>packages\System.IO.Pipelines.10.0.0-rc.2.25502.107\lib\net462\System.IO.Pipelines.dll</HintPath>
     </Reference>
@@ -101,6 +102,7 @@
     <Compile Include="Code\WarcraftTypes\WindfuryFightResult.cs" />
     <Compile Include="Code\WarcraftTypes\WindfuryGroupFightResult.cs" />
     <Compile Include="Code\WarcraftTypes\WindfuryPlayerFightResult.cs" />
+    <Compile Include="Code\XlsxWriter.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <EmbeddedResource Include="Properties\Resources.resx">
