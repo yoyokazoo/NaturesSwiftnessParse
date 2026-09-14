@@ -1210,18 +1210,27 @@ namespace NaturesSwiftnessParse
         }
 
         // One data row (label + stat block), already scoped to a single sheet's fights by the caller
-        // -- used both per-shaman and for the trailing "All Shamans" rollup row.
+        // -- used both per-shaman and for the trailing "All Shamans" rollup row. Percentage-valued
+        // stats are stored as a 0-1 fraction with the Percent1 format applied (the idiomatic
+        // spreadsheet way to store a percentage -- displays as "92.3%" and behaves correctly in any
+        // formula/conditional-formatting someone builds on top of it); the two seconds columns get
+        // the Number1 format so they always show one decimal place (e.g. "295.0", not "295");
+        // Twisted Fights is a whole-number count, so it gets Integer instead (no decimal at all).
         private static object[] BuildStatRow(string label, List<WindfuryPlayerFightResult> results, List<WindfuryGroupFightResult> groupResults)
         {
+            XlsxNumber Percent(double percentValue) => new XlsxNumber(percentValue / 100.0, XlsxNumberFormat.Percent1);
+            XlsxNumber Number(double value) => new XlsxNumber(value, XlsxNumberFormat.Number1);
+            XlsxNumber Count(int value) => new XlsxNumber(value, XlsxNumberFormat.Integer);
+
             return new object[]
             {
                 label, "",
-                Math.Round(ComputeTimeWeightedMaxUptime(groupResults), 1),
-                Math.Round(ComputeTimeWeightedUptime(results), 1), "",
-                Math.Round(groupResults.Sum(g => g.TwistedTotemMs) / 1000.0, 1),
-                Math.Round(groupResults.Sum(g => g.TwistingWindfuryLossMs) / 1000.0, 1),
-                Math.Round(ComputeTwistingEfficiency(groupResults), 1),
-                groupResults.Count(g => g.WasTwisted)
+                Percent(ComputeTimeWeightedMaxUptime(groupResults)),
+                Percent(ComputeTimeWeightedUptime(results)), "",
+                Number(groupResults.Sum(g => g.TwistedTotemMs) / 1000.0),
+                Number(groupResults.Sum(g => g.TwistingWindfuryLossMs) / 1000.0),
+                Percent(ComputeTwistingEfficiency(groupResults)),
+                Count(groupResults.Count(g => g.WasTwisted))
             };
         }
     }
