@@ -36,19 +36,28 @@ namespace NaturesSwiftnessParse
         public List<(long Timestamp, bool IsWindfuryCast)> RawTwistingCasts { get; private set; }
         public List<(long Start, long End)> TwistingLossIntervals { get; private set; }
         public long FightStartTime { get; private set; }
-        // Of the other Air totem's (Grace of Air or Tranquil Air -- see
-        // TotemBuffEvent.NON_WINDFURY_AIR_TOTEM_CAST_ABILITY_IDS) uptime theoretically available
-        // this fight (10s Windfury window minus the 1.5s global cooldown, per Windfury-to-Windfury
-        // cycle starting from the shaman's first Windfury Totem cast -- see
-        // WindfuryUptimeParse.ComputeTwistingStats), how much the shaman actually captured.
-        // Independent of TwistingWindfuryLossMs above: a cycle can be "efficient" (little missed
-        // time) while still causing a Windfury loss if it runs long, and vice versa.
-        public long TwistingAirTotemAvailableMs { get; private set; }
-        public long TwistingAirTotemActualMs { get; private set; }
+        // Twisted Totem Seconds: total real seconds the other Air totem (Grace of Air or Tranquil
+        // Air -- see TotemBuffEvent.NON_WINDFURY_AIR_TOTEM_CAST_ABILITY_IDS) occupied the Air slot
+        // this fight, from each cast until it's swapped back (next Windfury cast) or the fight ends
+        // -- uncapped by any ideal window, so a cycle that ran long (causing Windfury loss) still
+        // counts its full span here. See WindfuryUptimeParse.ComputeTwistingStats.
+        public long TwistedTotemMs { get; private set; }
+        // The denominator for Twisting Efficiency: 8.5s of every 10s (10s Windfury duration minus
+        // the 1.5s global cooldown needed to drop Windfury Totem itself) from the shaman's *first*
+        // Air totem cast this fight to fight end -- the theoretical max Twisted Totem Seconds
+        // achievable if every cycle were run exactly on the ideal 1.5s-Windfury/8.5s-Air cadence.
+        // Zero if the shaman never cast the other Air totem this fight (nothing to measure).
+        public long TwistingEfficiencyAvailableMs { get; private set; }
         public List<TwistingCycleTrace> TwistingCycles { get; private set; }
 
         public double MaxUptimePercent => FightDurationMs == 0 ? 0 : (100.0 * CoveredMs / FightDurationMs);
-        public double TwistingEfficiencyPercent => TwistingAirTotemAvailableMs == 0 ? 0 : (100.0 * TwistingAirTotemActualMs / TwistingAirTotemAvailableMs);
+        // Of the theoretically achievable Twisted Totem Seconds (TwistingEfficiencyAvailableMs),
+        // how much did the shaman net after being charged for any Windfury uptime their twisting
+        // cost (TwistingWindfuryLossMs) -- so running an Air totem long enough to rack up seconds
+        // but also lapse Windfury doesn't get credited for free. Floored at 0% for the pathological
+        // case where the loss charge exceeds the Twisted Totem Seconds actually earned.
+        public double TwistingEfficiencyPercent => TwistingEfficiencyAvailableMs == 0 ? 0
+            : (100.0 * System.Math.Max(0, TwistedTotemMs - TwistingWindfuryLossMs) / TwistingEfficiencyAvailableMs);
         // Whether the shaman cast Grace of Air Totem or Tranquil Air Totem at all this fight -- used
         // to exclude fights where they never attempted to twist from the "twisted fights" aggregate
         // (see WindfuryUptimeParse.PrintTwistedFightsSummary), rather than letting them drag it
@@ -57,7 +66,7 @@ namespace NaturesSwiftnessParse
 
         public WindfuryGroupFightResult(int fightId, int shamanActorId, string shamanName, List<TotemBuffEvent> unionIntervals, int memberCount, long fightDurationMs,
             long twistingWindfuryLossMs = 0, List<(long Timestamp, bool IsWindfuryCast)> rawTwistingCasts = null, List<(long Start, long End)> twistingLossIntervals = null, long fightStartTime = 0,
-            long twistingAirTotemAvailableMs = 0, long twistingAirTotemActualMs = 0, List<TwistingCycleTrace> twistingCycles = null)
+            long twistedTotemMs = 0, long twistingEfficiencyAvailableMs = 0, List<TwistingCycleTrace> twistingCycles = null)
         {
             FightId = fightId;
             ShamanActorId = shamanActorId;
@@ -69,8 +78,8 @@ namespace NaturesSwiftnessParse
             RawTwistingCasts = rawTwistingCasts ?? new List<(long, bool)>();
             TwistingLossIntervals = twistingLossIntervals ?? new List<(long, long)>();
             FightStartTime = fightStartTime;
-            TwistingAirTotemAvailableMs = twistingAirTotemAvailableMs;
-            TwistingAirTotemActualMs = twistingAirTotemActualMs;
+            TwistedTotemMs = twistedTotemMs;
+            TwistingEfficiencyAvailableMs = twistingEfficiencyAvailableMs;
             TwistingCycles = twistingCycles ?? new List<TwistingCycleTrace>();
 
             long covered = 0;
@@ -84,7 +93,8 @@ namespace NaturesSwiftnessParse
         public override string ToString()
         {
             return $"{ShamanName}'s group ({MemberCount} eligible member(s)): {MaxUptimePercent:0.#}% max uptime ({CoveredMs}ms / {FightDurationMs}ms), " +
-                $"Twisting Windfury Loss {TwistingWindfuryLossMs / 1000.0:0.#}s, Twisting Efficiency {TwistingEfficiencyPercent:0.#}% ({TwistingAirTotemActualMs / 1000.0:0.#}s / {TwistingAirTotemAvailableMs / 1000.0:0.#}s)";
+                $"Twisted Totem Seconds {TwistedTotemMs / 1000.0:0.#}s, Twisting Windfury Loss {TwistingWindfuryLossMs / 1000.0:0.#}s, " +
+                $"Twisting Efficiency {TwistingEfficiencyPercent:0.#}% (({TwistedTotemMs / 1000.0:0.#}s - {TwistingWindfuryLossMs / 1000.0:0.#}s) / {TwistingEfficiencyAvailableMs / 1000.0:0.#}s)";
         }
 
         // Fight-relative seconds, e.g. 19044ms -> "19.044s" -- matches how someone would read
@@ -122,7 +132,7 @@ namespace NaturesSwiftnessParse
             }
             lines.Add($"      total Twisting Windfury Loss: {TwistingWindfuryLossMs / 1000.0:0.000}s");
 
-            lines.Add("      twisting cycles (other Air totem availability):");
+            lines.Add("      twisting cycles (other Air totem usage; [ideal window] shown for reference only, no longer summed into Twisting Efficiency):");
             foreach (var cycle in TwistingCycles)
             {
                 var windowStart = FormatRelativeSeconds(cycle.WindowStart, FightStartTime);
@@ -131,9 +141,9 @@ namespace NaturesSwiftnessParse
                 var captured = cycle.CapturedStart.HasValue
                     ? $"{FormatRelativeSecondsOrNull(cycle.CapturedStart)} - {FormatRelativeSecondsOrNull(cycle.CapturedEnd)}"
                     : "none";
-                lines.Add($"        window [{windowStart} - {windowEnd}] ({cycle.AvailableMs / 1000.0:0.000}s avail): Air totem cast @ {airCast}, captured [{captured}] ({cycle.ActualMs / 1000.0:0.000}s)");
+                lines.Add($"        [ideal window {windowStart} - {windowEnd}, {cycle.AvailableMs / 1000.0:0.000}s]: Air totem cast @ {airCast}, down [{captured}] ({cycle.TwistedMs / 1000.0:0.000}s Twisted Totem Seconds, {cycle.LossMs / 1000.0:0.000}s Windfury loss)");
             }
-            lines.Add($"      total Twisting Efficiency: {TwistingAirTotemActualMs / 1000.0:0.000}s / {TwistingAirTotemAvailableMs / 1000.0:0.000}s -> {TwistingEfficiencyPercent:0.#}%");
+            lines.Add($"      total: {TwistedTotemMs / 1000.0:0.000}s Twisted Totem Seconds - {TwistingWindfuryLossMs / 1000.0:0.000}s Windfury loss, over {TwistingEfficiencyAvailableMs / 1000.0:0.000}s theoretical max (since first Air totem cast) -> Twisting Efficiency {TwistingEfficiencyPercent:0.#}%");
 
             return string.Join("\n", lines);
         }
