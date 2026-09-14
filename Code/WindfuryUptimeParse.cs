@@ -1164,6 +1164,7 @@ namespace NaturesSwiftnessParse
             var writer = new XlsxWriter();
             writer.AddSheet("Boss", BuildSheetRows(raidCell, allResults, allGroupResults, bossFightIds, isBossSheet: true, shamanNamesById, playerNameFilter));
             writer.AddSheet("Trash", BuildSheetRows(raidCell, allResults, allGroupResults, bossFightIds, isBossSheet: false, shamanNamesById, playerNameFilter));
+            writer.AddSheet("Individual Bosses", BuildIndividualBossesRows(reportId, fightResults, shamanNamesById, playerNameFilter));
 
             string fileName = $"WindfuryReport-{reportId}.xlsx";
             writer.Save(fileName);
@@ -1173,16 +1174,73 @@ namespace NaturesSwiftnessParse
         }
 
         // All rows for one sheet (Boss or Trash) -- filters every result/group down to that sheet's
-        // fight set before handing off to BuildStatRow, so BuildStatRow itself doesn't need to know
-        // Boss/Trash exists at all.
+        // fight set before handing off to BuildStatSheetRows, so that shared row-builder doesn't need
+        // to know Boss/Trash exists at all (see BuildIndividualBossesRows for the other caller).
         private static List<object[]> BuildSheetRows(XlsxFormula raidCell, List<WindfuryPlayerFightResult> allResults, List<WindfuryGroupFightResult> allGroupResults,
             HashSet<int> bossFightIds, bool isBossSheet, Dictionary<int, string> shamanNamesById, string playerNameFilter)
         {
             bool InScope(int fightId) => isBossSheet ? bossFightIds.Contains(fightId) : !bossFightIds.Contains(fightId);
 
+            var results = allResults.Where(r => InScope(r.FightId)).ToList();
+            var groupResults = allGroupResults.Where(g => InScope(g.FightId)).ToList();
+            return BuildStatSheetRows(raidCell, results, groupResults, shamanNamesById, playerNameFilter);
+        }
+
+        // "Individual Bosses" sheet: one stat block per distinct boss encountered (grouped by fight
+        // name -- every pull of that boss, wipes included, combines into one block, same scoping the
+        // Boss tab does but narrowed to a single encounter), stacked one after another with a blank
+        // row between them rather than each getting its own sheet. Each block repeats the full
+        // header-cell/column-header shape the Boss/Trash sheets use -- see BuildStatSheetRows. The
+        // header cell links to that boss's *last* pull this raid (its highest fight id, since WCL
+        // numbers fights in pull order) -- typically the kill if the raid downed it, though kill/wipe
+        // outcome isn't tracked here, just recency. Blocks are ordered by that boss's first pull,
+        // i.e. raid-night order.
+        private static List<object[]> BuildIndividualBossesRows(string reportId, List<WindfuryFightResult> fightResults,
+            Dictionary<int, string> shamanNamesById, string playerNameFilter)
+        {
+            var rows = new List<object[]>();
+
+            var bossGroups = fightResults.Where(f => f.IsBossFight)
+                .GroupBy(f => f.FightName)
+                .OrderBy(g => g.Min(f => f.FightId))
+                .ToList();
+
+            for (int i = 0; i < bossGroups.Count; i++)
+            {
+                var bossGroup = bossGroups[i];
+                string bossName = bossGroup.Key;
+                int lastPullFightId = bossGroup.Max(f => f.FightId);
+
+                var results = bossGroup.SelectMany(f => f.PlayerResults).Where(r => r.ShamanActorId.HasValue).ToList();
+                var groupResults = bossGroup.SelectMany(f => f.GroupResults).ToList();
+
+                string fightLink = $"https://vanilla.warcraftlogs.com/reports/{reportId}?fight={lastPullFightId}";
+                var fightCell = new XlsxFormula($"HYPERLINK(\"{fightLink}\",\"{bossName.Replace("\"", "\"\"")}\")", bossName);
+
+                rows.AddRange(BuildStatSheetRows(fightCell, results, groupResults, shamanNamesById, playerNameFilter));
+
+                if (i < bossGroups.Count - 1)
+                {
+                    rows.Add(new object[0]); // spacing row before the next boss's block
+                }
+            }
+
+            return rows;
+        }
+
+        // Shared row-builder behind every stats block (Boss, Trash, and each boss's block on
+        // Individual Bosses): a
+        // header cell, column headers, one row per shaman already scoped to that sheet's fights by
+        // the caller, a blank spacer, then a trailing "All Shamans" rollup (mirroring the raid-wide
+        // bucket PrintSummary adds). shamanNamesById is always the full report-wide roster, not
+        // narrowed to this sheet's fights -- so every sheet lists the same shamans in the same order,
+        // even one who shows all zeros because they never twisted in that particular scope.
+        private static List<object[]> BuildStatSheetRows(object headerCell, List<WindfuryPlayerFightResult> results, List<WindfuryGroupFightResult> groupResults,
+            Dictionary<int, string> shamanNamesById, string playerNameFilter)
+        {
             var rows = new List<object[]>
             {
-                new object[] { raidCell },
+                new object[] { headerCell },
                 new object[] { "Shaman Name", "", "Max WF Uptime", "WF Uptime", "", "Twisted Totem Seconds", "Twisted WF Loss", "Twist Efficiency", "Twisted Fights" }
             };
 
@@ -1192,17 +1250,15 @@ namespace NaturesSwiftnessParse
                 var shamanName = shamanNamesById[shamanId];
                 if (playerNameFilter != null && !shamanName.Equals(playerNameFilter, StringComparison.OrdinalIgnoreCase)) continue;
 
-                var results = allResults.Where(r => r.ShamanActorId.Value == shamanId && InScope(r.FightId)).ToList();
-                var groupResults = allGroupResults.Where(g => g.ShamanActorId == shamanId && InScope(g.FightId)).ToList();
-                rows.Add(BuildStatRow(shamanName, results, groupResults));
+                var shamanResults = results.Where(r => r.ShamanActorId.Value == shamanId).ToList();
+                var shamanGroupResults = groupResults.Where(g => g.ShamanActorId == shamanId).ToList();
+                rows.Add(BuildStatRow(shamanName, shamanResults, shamanGroupResults));
                 shamanRowCount++;
             }
 
             if (playerNameFilter == null && shamanRowCount > 0)
             {
                 rows.Add(new object[0]); // spacer between the last shaman and the rollup below
-                var results = allResults.Where(r => InScope(r.FightId)).ToList();
-                var groupResults = allGroupResults.Where(g => InScope(g.FightId)).ToList();
                 rows.Add(BuildStatRow("All Shamans", results, groupResults));
             }
 
