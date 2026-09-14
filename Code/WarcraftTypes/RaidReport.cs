@@ -155,14 +155,12 @@ namespace NaturesSwiftnessParse
                 var damageLink = $"https://vanilla.warcraftlogs.com/reports/{Id}?fight={highlightFight.Id}&type=resources&source={highlightEvent.HealHealthPointEvent.Id}&view=events";
                 var fightLink = $"https://vanilla.warcraftlogs.com/reports/{Id}?fight={highlightFight.Id}";
 
-                string highlightString = $"{i+1}: {highlightEvent.CasterName} NS'ed {highlightEvent.HealEvent.TargetName} at {highlightEvent.HealHealthPointEvent.Percent}%, {healDelayString} after they got [hit to {highlightEvent.NSDamageEvent.Percent}%]({damageLink}) during [{highlightFight.Name}]({fightLink})";
-
                 // Write method to find follow up Nature's Swiftnesses and call them out
                 List<NaturesSwiftnessEvent> followUpNS = new List<NaturesSwiftnessEvent>();
                 foreach(var nsEvent in NaturesSwiftnessEvents)
                 {
                     var followUpTime = nsEvent.HealTime - highlightEvent.HealTime;
-                    if (nsEvent.FightId == highlightFight.Id && 
+                    if (nsEvent.FightId == highlightFight.Id &&
                         nsEvent.HealEvent?.TargetName == highlightEvent.HealEvent?.TargetName &&
                         followUpTime >= 0 && followUpTime < 2000 &&
                         nsEvent.CasterName != highlightEvent.CasterName)
@@ -172,9 +170,20 @@ namespace NaturesSwiftnessParse
                     }
                 }
 
-                var orderedFollowUpNS = followUpNS.OrderBy(ns => ns.HealTime).ToList();
+                // NS casts landing at the exact same moment as the highlight get folded into the
+                // caster list instead of being reported as a "followed up" NS
+                var simultaneousNS = followUpNS.Where(ns => ns.HealTime == highlightEvent.HealTime).ToList();
+                var laterNS = followUpNS.Except(simultaneousNS).OrderBy(ns => ns.HealTime).ToList();
+
+                var casterNames = new List<string> { highlightEvent.CasterName };
+                casterNames.AddRange(simultaneousNS.Select(ns => ns.CasterName));
+                var casterString = JoinNames(casterNames);
+                var simultaneousSuffix = simultaneousNS.Count > 0 ? " at the exact same time," : ",";
+
+                string highlightString = $"{i+1}: {casterString} NS'ed {highlightEvent.HealEvent.TargetName} at {highlightEvent.HealHealthPointEvent.Percent}%{simultaneousSuffix} {healDelayString} after they got [hit to {highlightEvent.NSDamageEvent.Percent}%]({damageLink}) during [{highlightFight.Name}]({fightLink})";
+
                 Console.WriteLine(highlightString);
-                foreach (var nsEvent in orderedFollowUpNS)
+                foreach (var nsEvent in laterNS)
                 {
                     //Console.WriteLine($"\tFollow up {FormatMilliseconds(nsEvent.Time - highlightEvent.Time)} later: {nsEvent}");
                     Console.WriteLine($"\t{nsEvent.CasterName} followed up with an NS {FormatMilliseconds(nsEvent.HealTime - highlightEvent.HealTime)} later, when {highlightEvent.HealEvent.TargetName} was at {nsEvent.HealHealthPointEvent.Percent}%");
@@ -305,6 +314,17 @@ namespace NaturesSwiftnessParse
             AddAbility(25357, "Healing Wave (Rank 10)");
         }
 
+        public static string JoinNames(List<string> names)
+        {
+            if (names.Count == 1)
+                return names[0];
+
+            if (names.Count == 2)
+                return $"{names[0]} and {names[1]}";
+
+            return $"{string.Join(", ", names.Take(names.Count - 1))}, and {names[names.Count - 1]}";
+        }
+
         public static string FormatMilliseconds(long ms)
         {
             double seconds = ms / 1000.0;
@@ -312,8 +332,8 @@ namespace NaturesSwiftnessParse
             // Format with 3 decimal places, then trim trailing zeros
             string formatted = seconds.ToString("0.###");
 
-            // Drop leading zero if under 1 second (e.g., 0.55 → .55)
-            if (formatted.StartsWith("0"))
+            // Drop leading zero if under 1 second (e.g., 0.55 → .55), but keep "0" as-is
+            if (formatted.StartsWith("0") && formatted != "0")
                 formatted = formatted.TrimStart('0');
 
             return $"{formatted}s";
