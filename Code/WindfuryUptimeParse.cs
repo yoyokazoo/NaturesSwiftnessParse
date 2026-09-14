@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -112,6 +114,8 @@ namespace NaturesSwiftnessParse
             PrintDebugInfo(fightResults, playerName);
 
             PrintSummary(fightResults, playerName);
+
+            WriteCsvSummary(raidReport, reportId, fightResults, playerName);
         }
 
         // ----- Fetching -----
@@ -1135,6 +1139,106 @@ namespace NaturesSwiftnessParse
             long coveredMs = results.Sum(r => r.CoveredMs);
             long totalMs = results.Sum(r => r.FightDurationMs);
             return totalMs == 0 ? 0 : (100.0 * coveredMs / totalMs);
+        }
+
+        // ----- CSV export -----
+
+        // One row per shaman (plus a trailing "All Shamans" rollup, mirroring the raid-wide bucket
+        // PrintSummary adds), with a blank column separating each logical group of stats so it reads
+        // cleanly once opened in a spreadsheet. Written as a real .csv file rather than to stdout,
+        // since "upload to Google Sheets" implies a file to import, not text to copy/paste.
+        private static void WriteCsvSummary(RaidReport raidReport, string reportId, List<WindfuryFightResult> fightResults, string playerNameFilter)
+        {
+            var allResults = fightResults.SelectMany(f => f.PlayerResults).Where(r => r.ShamanActorId.HasValue).ToList();
+            var allGroupResults = fightResults.SelectMany(f => f.GroupResults).ToList();
+            var bossFightIds = new HashSet<int>(fightResults.Where(f => f.IsBossFight).Select(f => f.FightId));
+
+            var shamanNamesById = new Dictionary<int, string>();
+            foreach (var r in allResults) shamanNamesById[r.ShamanActorId.Value] = r.ShamanName;
+            foreach (var g in allGroupResults) shamanNamesById[g.ShamanActorId] = g.ShamanName;
+
+            var rows = new List<string[]>
+            {
+                new[]
+                {
+                    "Shaman Name", "",
+                    "Boss Max Windfury Uptime", "Boss Windfury Uptime", "",
+                    "Boss Twisted Totem Seconds", "Boss Twisted Windfury Loss", "Boss Twist Efficiency", "Boss Twisted Fights", "",
+                    "Trash Max Windfury Uptime", "Trash Windfury Uptime", "",
+                    "Trash Twisted Totem Seconds", "Trash Twisted Windfury Loss", "Trash Twist Efficiency", "Trash Twisted Fights"
+                }
+            };
+
+            int shamanRowCount = 0;
+            foreach (var shamanId in shamanNamesById.Keys.OrderBy(id => shamanNamesById[id]))
+            {
+                var shamanName = shamanNamesById[shamanId];
+                if (playerNameFilter != null && !shamanName.Equals(playerNameFilter, StringComparison.OrdinalIgnoreCase)) continue;
+
+                var shamanResults = allResults.Where(r => r.ShamanActorId.Value == shamanId).ToList();
+                var shamanGroupResults = allGroupResults.Where(g => g.ShamanActorId == shamanId).ToList();
+                rows.Add(BuildCsvRow(shamanName, shamanResults, shamanGroupResults, bossFightIds));
+                shamanRowCount++;
+            }
+
+            if (playerNameFilter == null && shamanRowCount > 0)
+            {
+                rows.Add(BuildCsvRow("All Shamans", allResults, allGroupResults, bossFightIds));
+            }
+
+            // Google Sheets evaluates a leading "=" in an imported CSV cell as a formula, the same as
+            // if it were typed directly into the sheet -- so the raid name renders as a clickable
+            // link to the report rather than plain text.
+            string raidLink = $"https://vanilla.warcraftlogs.com/reports/{reportId}";
+            string raidDisplayName = (string.IsNullOrEmpty(raidReport.Name) ? reportId : raidReport.Name).Replace("\"", "\"\"");
+            string raidCell = $"=HYPERLINK(\"{raidLink}\",\"{raidDisplayName}\")";
+
+            var csvLines = new List<string> { CsvEscape(raidCell) };
+            csvLines.AddRange(rows.Select(row => string.Join(",", row.Select(CsvEscape))));
+
+            string fileName = $"WindfuryReport-{reportId}.csv";
+            File.WriteAllLines(fileName, csvLines);
+
+            Console.WriteLine();
+            Console.WriteLine($"Wrote Google Sheets-friendly CSV summary to {Path.GetFullPath(fileName)}");
+        }
+
+        // One data row (Shaman Name + the Boss/Trash stat block) for WriteCsvSummary -- also used
+        // for the trailing "All Shamans" rollup row, just fed the unfiltered result lists.
+        private static string[] BuildCsvRow(string label, List<WindfuryPlayerFightResult> results, List<WindfuryGroupFightResult> groupResults, HashSet<int> bossFightIds)
+        {
+            var bossResults = results.Where(r => bossFightIds.Contains(r.FightId)).ToList();
+            var trashResults = results.Where(r => !bossFightIds.Contains(r.FightId)).ToList();
+            var bossGroupResults = groupResults.Where(g => bossFightIds.Contains(g.FightId)).ToList();
+            var trashGroupResults = groupResults.Where(g => !bossFightIds.Contains(g.FightId)).ToList();
+
+            string Num(double value) => value.ToString("0.0", CultureInfo.InvariantCulture);
+            string Count(int value) => value.ToString(CultureInfo.InvariantCulture);
+
+            return new[]
+            {
+                label, "",
+                Num(ComputeTimeWeightedMaxUptime(bossGroupResults)),
+                Num(ComputeTimeWeightedUptime(bossResults)), "",
+                Num(bossGroupResults.Sum(g => g.TwistedTotemMs) / 1000.0),
+                Num(bossGroupResults.Sum(g => g.TwistingWindfuryLossMs) / 1000.0),
+                Num(ComputeTwistingEfficiency(bossGroupResults)),
+                Count(bossGroupResults.Count(g => g.WasTwisted)), "",
+                Num(ComputeTimeWeightedMaxUptime(trashGroupResults)),
+                Num(ComputeTimeWeightedUptime(trashResults)), "",
+                Num(trashGroupResults.Sum(g => g.TwistedTotemMs) / 1000.0),
+                Num(trashGroupResults.Sum(g => g.TwistingWindfuryLossMs) / 1000.0),
+                Num(ComputeTwistingEfficiency(trashGroupResults)),
+                Count(trashGroupResults.Count(g => g.WasTwisted))
+            };
+        }
+
+        private static string CsvEscape(string field)
+        {
+            if (string.IsNullOrEmpty(field)) return "";
+            if (field.IndexOfAny(new[] { ',', '"', '\n', '\r' }) < 0) return field;
+
+            return "\"" + field.Replace("\"", "\"\"") + "\"";
         }
     }
 }
