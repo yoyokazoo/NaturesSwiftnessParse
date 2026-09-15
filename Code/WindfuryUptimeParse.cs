@@ -94,6 +94,12 @@ namespace NaturesSwiftnessParse
             var groupOf = await InferPartyGroupsIncrementally(raidReport, reportId, allReportFightIds, debugFightId, debugGear);
             if (debugGear) PrintInferredGroups(raidReport, groupOf);
 
+            // Every actual player (any class, eligible-for-Windfury-uptime-tracking or not) sharing a
+            // shaman's inferred party -- used for the "WF Recipients" column on the Individual Bosses
+            // sheet. Report-wide rather than per fight, since party membership is inferred once for
+            // the whole raid night, not reshuffled fight to fight (see InferPartyGroupsIncrementally).
+            var partyMembersByShamanId = BuildPartyMembersByShaman(raidReport, groupOf);
+
             var fightResults = new List<WindfuryFightResult>();
             foreach (var fightId in allFightIds)
             {
@@ -115,7 +121,7 @@ namespace NaturesSwiftnessParse
 
             PrintSummary(fightResults, playerName);
 
-            WriteXlsxSummary(raidReport, reportId, fightResults, playerName);
+            WriteXlsxSummary(raidReport, reportId, fightResults, playerName, partyMembersByShamanId);
         }
 
         // ----- Fetching -----
@@ -616,6 +622,36 @@ namespace NaturesSwiftnessParse
             }
         }
 
+        // Every actual player sharing a shaman's inferred party, of any class -- not narrowed to
+        // EligibleClasses (Warrior/Rogue), since a group can (and normally does) contain classes that
+        // don't get tracked for Windfury uptime at all but would still receive it. Pets are excluded
+        // (groupOf can contain them tagging along with their owner -- see InferPartyGroups -- but a
+        // pet has no weapon to enchant). Only as complete as what party-buff evidence could place in
+        // a group at all (see InferPartyGroups) -- a party showing fewer than 5 members here means
+        // the evidence ran out, not necessarily that the party actually had fewer people in it.
+        private static Dictionary<int, List<string>> BuildPartyMembersByShaman(RaidReport raidReport, Dictionary<int, int> groupOf)
+        {
+            var shamanByGroupId = raidReport.ActorsById.Keys
+                .Where(id => raidReport.GetActorClass(id).Equals("Shaman", StringComparison.OrdinalIgnoreCase) && groupOf.ContainsKey(id))
+                .GroupBy(id => groupOf[id])
+                .ToDictionary(g => g.Key, g => g.Min());
+
+            var membersByGroupId = groupOf
+                .Where(kv => raidReport.GetActorType(kv.Key) == "Player")
+                .GroupBy(kv => kv.Value)
+                .ToDictionary(g => g.Key, g => g.Select(kv => raidReport.GetActor(kv.Key)).OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToList());
+
+            var result = new Dictionary<int, List<string>>();
+            foreach (var kv in shamanByGroupId)
+            {
+                int groupId = kv.Key;
+                int shamanId = kv.Value;
+                result[shamanId] = membersByGroupId.TryGetValue(groupId, out var members) ? members : new List<string>();
+            }
+
+            return result;
+        }
+
         // ----- Per-fight computation -----
 
         private static WindfuryFightResult ComputeWindfuryForFight(RaidReport raidReport, int fightId, List<EventRow> windfuryEvents, Dictionary<int, int> groupOf, Dictionary<int, TwistingStats> twistingByShaman)
@@ -740,7 +776,7 @@ namespace NaturesSwiftnessParse
                 fightResult.GroupResults.Add(new WindfuryGroupFightResult(
                     fightId, shamanGroup.Key.Item1, shamanGroup.Key.ShamanName, unionIntervals, shamanGroup.Count(), fightEnd - fightStart,
                     twisting.LossMs, twisting.RawCasts ?? new List<(long, bool)>(), twisting.LossIntervals ?? new List<(long, long)>(), fightStart,
-                    twisting.TwistedTotemMs, twisting.TwistingEfficiencyAvailableMs, twisting.CycleTraces ?? new List<TwistingCycleTrace>()));
+                    twisting.TwistedTotemMs, twisting.TwistingEfficiencyAvailableMs, twisting.TwistingEfficiencyNetMs, twisting.CycleTraces ?? new List<TwistingCycleTrace>()));
             }
 
             if (debugGear)
@@ -801,6 +837,7 @@ namespace NaturesSwiftnessParse
             public List<(long Start, long End)> LossIntervals;
             public long TwistedTotemMs;
             public long TwistingEfficiencyAvailableMs;
+            public long TwistingEfficiencyNetMs;
             public List<TwistingCycleTrace> CycleTraces;
         }
 
@@ -810,34 +847,39 @@ namespace NaturesSwiftnessParse
         // to get the benefit of both. Windfury's buff (a temporary weapon enchant) persists ~10s from
         // each (re)application regardless of what totem is currently down -- that's what makes
         // twisting possible: swapping away from Windfury doesn't immediately strip it, it just stops
-        // it from being refreshed. Per "only use casts to determine this", both metrics below work
+        // it from being refreshed. Per "only use casts to determine this", every metric below works
         // off cast events alone, not applied-buff events.
         //
-        // Both metrics are computed over the same "cycles" -- the span from one Windfury Totem cast
-        // to the next (or, for the last cast seen, to the end of the fight) -- starting from the
-        // shaman's *first* Windfury Totem cast in the fight: the synthetic "already had Windfury"
-        // assumption the ordinary uptime metric makes at fight start doesn't apply here, since a
-        // cycle needs a real cast to anchor it.
+        // All three metrics are computed over the same "cycles" -- the span from one Windfury Totem
+        // cast to the next (or, for the last cast seen, to the end of the fight):
         //
-        // - Twisting Windfury Loss: if the shaman doesn't re-cast Windfury Totem before its 10s
-        //   buff runs out, the group loses Windfury until it's recast -- but only counted as
-        //   "twisting" loss when the other Air totem was cast since the last Windfury cast; a shaman
-        //   who simply doesn't keep Windfury Totem up (or never touches the other totem) isn't
-        //   twisting, so their gaps aren't attributed here.
-        // - Twisted Totem Seconds: total real seconds the other Air totem occupied the Air slot,
-        //   from whenever it was cast that cycle (if at all) until it's swapped back (the next
-        //   Windfury cast) or the fight ends -- uncapped, so a cycle that ran long still counts its
-        //   full span here (that's what lets Twisting Efficiency below charge for it separately,
-        //   rather than the cap silently absorbing it the way the old per-cycle version did).
-        // - Twisting Efficiency: the 1.5s global cooldown after casting Windfury Totem means it
-        //   can't be dropped immediately, so at most 10s - 1.5s = 8.5s of every 10s is ever
-        //   available for the other totem -- that ratio (8.5/10) applied to the whole span from the
-        //   shaman's *first* Air totem cast this fight to fight end is the theoretical max Twisted
-        //   Totem Seconds achievable (TwistingEfficiencyAvailableMs), a single continuous window
-        //   rather than summed per-cycle. The shaman is credited their actual Twisted Totem Seconds
-        //   over that span, minus whatever Twisting Windfury Loss their twisting cost -- so casting
-        //   the other totem late, or leaving it down long enough to lapse Windfury, both cost
-        //   efficiency; see WindfuryGroupFightResult.TwistingEfficiencyPercent for the ratio itself.
+        // - Twisting Windfury Loss: if the shaman doesn't re-cast Windfury Totem before its 10s buff
+        //   runs out, the group loses Windfury until it's recast -- but only counted as "twisting"
+        //   loss when the other Air totem was cast since the last Windfury cast; a shaman who simply
+        //   doesn't keep Windfury Totem up (or never touches the other totem) isn't twisting, so
+        //   their gaps aren't attributed here.
+        // - Twisted Totem Seconds: total real seconds the other Air totem occupied the Air slot, from
+        //   whenever it was cast that cycle (if at all) until it's swapped back (the next Windfury
+        //   cast) or the fight ends -- uncapped, so a cycle that ran long still counts its full span
+        //   here. This is a raw activity count, not bounded by anything -- it's Twisting Efficiency
+        //   below that has to do the work of judging whether that activity was actually productive.
+        // - Twisting Efficiency: of the other totem's uptime theoretically available, how much was
+        //   actually captured, net of any Windfury uptime the twisting cost. "Available" is computed
+        //   the same way per cycle as Twisted Totem Seconds' raw activity, but CAPPED to each cycle's
+        //   own ideal window (the 1.5s global cooldown after a Windfury cast means at most 10s - 1.5s
+        //   = 8.5s of every 10s is ever capturable, clipped further to fight end for a trailing
+        //   cycle) -- and "captured" is capped to that same window before subtracting loss. Capping
+        //   both sides of the ratio the same way is what guarantees the result can never exceed 100%:
+        //   net is bounded by capped-captured, which is bounded by available, by construction, for
+        //   every cycle, so it holds in the sum too. (An earlier version of this metric divided
+        //   *uncapped* Twisted Totem Seconds minus loss by a single flat "8.5/10 of the whole span"
+        //   formula; that flat formula is only valid as a steady-state average across many complete
+        //   cycles, and both over- and under-counts a trailing cycle that ends via fight end rather
+        //   than another Windfury cast -- in the worst case producing efficiency readings over 100%.
+        //   Capping per cycle instead fixes that structurally, not just empirically.) Only cycles at
+        //   or after the shaman's *first* Air totem cast this fight count at all -- the synthetic
+        //   "already had Windfury" assumption the ordinary uptime metric makes at fight start doesn't
+        //   apply here, and a fight where twisting was never attempted shouldn't be scored on it.
         private static TwistingStats ComputeTwistingStats(long fightEnd, List<EventRow> castEventsForShaman)
         {
             var rawCasts = new List<(long Timestamp, bool IsWindfuryCast)>();
@@ -852,8 +894,8 @@ namespace NaturesSwiftnessParse
 
             var lossIntervals = new List<(long Start, long End)>();
             var cycleTraces = new List<TwistingCycleTrace>();
-            long lossMs = 0, twistedTotemMs = 0;
-            long? firstAirTotemCastTime = null;
+            long lossMs = 0, twistedTotemMs = 0, efficiencyAvailableMs = 0, efficiencyNetMs = 0;
+            bool twistingStarted = false;
 
             var windfuryCastTimes = rawCasts.Where(c => c.IsWindfuryCast).Select(c => c.Timestamp).ToList();
 
@@ -869,6 +911,8 @@ namespace NaturesSwiftnessParse
                     .Select(c => (long?)c.Timestamp)
                     .Min(); // null (not an exception) when there's no such element -- Min() over a nullable-typed sequence handles empty gracefully
 
+                if (otherAirTotemCastTime.HasValue) twistingStarted = true;
+
                 // ----- Twisting Windfury Loss -----
                 long windfuryExpiresAt = cycleStart + TotemBuffEvent.WINDFURY_BUFF_DURATION_MS;
                 long cycleLossMs = 0;
@@ -879,7 +923,7 @@ namespace NaturesSwiftnessParse
                     lossIntervals.Add((windfuryExpiresAt, cycleEnd));
                 }
 
-                // ----- Twisted Totem Seconds -----
+                // ----- Twisted Totem Seconds (uncapped raw activity) -----
                 long? capturedStart = null, capturedEnd = null;
                 long cycleTwistedMs = 0;
                 if (otherAirTotemCastTime.HasValue)
@@ -888,26 +932,31 @@ namespace NaturesSwiftnessParse
                     capturedEnd = cycleEnd; // stays down until swapped back (next Windfury cast) or the fight ends -- uncapped
                     cycleTwistedMs = cycleEnd - otherAirTotemCastTime.Value;
                     twistedTotemMs += cycleTwistedMs;
-
-                    if (!firstAirTotemCastTime.HasValue) firstAirTotemCastTime = otherAirTotemCastTime;
                 }
 
-                // Ideal 8.5s-of-10s reference window for this cycle -- diagnostic only (shown in the
-                // debug trace), no longer summed into Twisting Efficiency; see
-                // TwistingEfficiencyAvailableMs below for the actual denominator.
+                // ----- Twisting Efficiency (capped to this cycle's own ideal window) -----
                 long windowStart = cycleStart + TotemBuffEvent.TOTEM_GLOBAL_COOLDOWN_MS;
                 long windowEnd = Math.Min(cycleStart + TotemBuffEvent.WINDFURY_BUFF_DURATION_MS, fightEnd);
                 long cycleAvailableMs = Math.Max(0, windowEnd - windowStart);
 
-                cycleTraces.Add(new TwistingCycleTrace(windowStart, windowEnd, otherAirTotemCastTime, capturedStart, capturedEnd, cycleAvailableMs, cycleTwistedMs, cycleLossMs));
-            }
+                long cycleCappedTwistedMs = 0;
+                if (otherAirTotemCastTime.HasValue)
+                {
+                    long overlapStart = Math.Max(otherAirTotemCastTime.Value, windowStart);
+                    long overlapEnd = Math.Min(cycleEnd, windowEnd);
+                    if (overlapEnd > overlapStart) cycleCappedTwistedMs = overlapEnd - overlapStart;
+                }
 
-            // 8.5s of every 10s, from the shaman's first Air totem cast this fight to fight end --
-            // zero if they never cast one (nothing to measure).
-            long twistingEfficiencyAvailableMs = firstAirTotemCastTime.HasValue
-                ? (long)Math.Round((fightEnd - firstAirTotemCastTime.Value)
-                    * (double)(TotemBuffEvent.WINDFURY_BUFF_DURATION_MS - TotemBuffEvent.TOTEM_GLOBAL_COOLDOWN_MS) / TotemBuffEvent.WINDFURY_BUFF_DURATION_MS)
-                : 0;
+                long cycleEfficiencyNetMs = cycleCappedTwistedMs - cycleLossMs;
+                if (twistingStarted)
+                {
+                    efficiencyAvailableMs += cycleAvailableMs;
+                    efficiencyNetMs += cycleEfficiencyNetMs;
+                }
+
+                cycleTraces.Add(new TwistingCycleTrace(windowStart, windowEnd, otherAirTotemCastTime, capturedStart, capturedEnd,
+                    cycleAvailableMs, cycleTwistedMs, cycleLossMs, cycleEfficiencyNetMs, twistingStarted));
+            }
 
             return new TwistingStats
             {
@@ -915,7 +964,8 @@ namespace NaturesSwiftnessParse
                 RawCasts = rawCasts,
                 LossIntervals = lossIntervals,
                 TwistedTotemMs = twistedTotemMs,
-                TwistingEfficiencyAvailableMs = twistingEfficiencyAvailableMs,
+                TwistingEfficiencyAvailableMs = efficiencyAvailableMs,
+                TwistingEfficiencyNetMs = efficiencyNetMs,
                 CycleTraces = cycleTraces
             };
         }
@@ -1107,14 +1157,18 @@ namespace NaturesSwiftnessParse
         // Time-weighted ((total Twisted Totem Seconds - total Windfury loss) / total available ms),
         // same reasoning as ComputeTimeWeightedUptime -- a handful of short fights (or a shaman's
         // first fight, before they've cast the other Air totem even once) shouldn't skew the number.
-        // Floored at 0 in case the loss charge exceeds what was earned, summed across fights.
+        // Sums each fight's own TwistingEfficiencyNetFlooredMs (already floored at 0 per fight), not
+        // the raw TwistingEfficiencyNetMs -- so a severe Windfury lapse can cost that ONE fight's own
+        // efficiency down to 0%, but can't reach into this sum and cancel out a genuinely good result
+        // from a different fight. Summing the raw, unclamped value instead would let a single bad
+        // fight's negative net subtract real credit from an unrelated fight's positive one.
         private static double ComputeTwistingEfficiency(List<WindfuryGroupFightResult> results)
         {
             if (results.Count == 0) return 0;
 
             long availableMs = results.Sum(r => r.TwistingEfficiencyAvailableMs);
-            long netTwistedMs = results.Sum(r => r.TwistedTotemMs - r.TwistingWindfuryLossMs);
-            return availableMs == 0 ? 0 : (100.0 * Math.Max(0, netTwistedMs) / availableMs);
+            long netMs = results.Sum(r => r.TwistingEfficiencyNetFlooredMs);
+            return availableMs == 0 ? 0 : (100.0 * netMs / availableMs); // netMs is already >= 0 term-by-term, no further floor needed
         }
 
         // Time-weighted (total covered ms / total eligible ms) rather than an average of per-fight
@@ -1147,7 +1201,7 @@ namespace NaturesSwiftnessParse
         // per-shaman row shape: the raid name/link on row 1, headers on row 2, one row per shaman,
         // a blank spacer row, then a trailing "All Shamans" rollup (mirroring the raid-wide bucket
         // PrintSummary adds). Boss/Trash is no longer a column prefix since it's now the sheet itself.
-        private static void WriteXlsxSummary(RaidReport raidReport, string reportId, List<WindfuryFightResult> fightResults, string playerNameFilter)
+        private static void WriteXlsxSummary(RaidReport raidReport, string reportId, List<WindfuryFightResult> fightResults, string playerNameFilter, Dictionary<int, List<string>> partyMembersByShamanId)
         {
             var allResults = fightResults.SelectMany(f => f.PlayerResults).Where(r => r.ShamanActorId.HasValue).ToList();
             var allGroupResults = fightResults.SelectMany(f => f.GroupResults).ToList();
@@ -1162,9 +1216,10 @@ namespace NaturesSwiftnessParse
             var raidCell = new XlsxFormula($"HYPERLINK(\"{raidLink}\",\"{raidDisplayName.Replace("\"", "\"\"")}\")", raidDisplayName);
 
             var writer = new XlsxWriter();
-            writer.AddSheet("Boss", BuildSheetRows(raidCell, allResults, allGroupResults, bossFightIds, isBossSheet: true, shamanNamesById, playerNameFilter));
-            writer.AddSheet("Trash", BuildSheetRows(raidCell, allResults, allGroupResults, bossFightIds, isBossSheet: false, shamanNamesById, playerNameFilter));
-            writer.AddSheet("Individual Bosses", BuildIndividualBossesRows(reportId, fightResults, shamanNamesById, playerNameFilter));
+            writer.AddSheet("Boss", BuildSheetRows(raidCell, allResults, allGroupResults, bossFightIds, isBossSheet: true, shamanNamesById, playerNameFilter, partyMembersByShamanId));
+            writer.AddSheet("Trash", BuildSheetRows(raidCell, allResults, allGroupResults, bossFightIds, isBossSheet: false, shamanNamesById, playerNameFilter, partyMembersByShamanId));
+            writer.AddSheet("Individual Bosses", BuildIndividualBossesRows(reportId, fightResults, shamanNamesById, playerNameFilter, partyMembersByShamanId));
+            writer.AddSheet("Individual Trash Fights", BuildIndividualTrashRows(reportId, fightResults, shamanNamesById, playerNameFilter, partyMembersByShamanId));
 
             string fileName = $"WindfuryReport-{reportId}.xlsx";
             writer.Save(fileName);
@@ -1177,13 +1232,13 @@ namespace NaturesSwiftnessParse
         // fight set before handing off to BuildStatSheetRows, so that shared row-builder doesn't need
         // to know Boss/Trash exists at all (see BuildIndividualBossesRows for the other caller).
         private static List<object[]> BuildSheetRows(XlsxFormula raidCell, List<WindfuryPlayerFightResult> allResults, List<WindfuryGroupFightResult> allGroupResults,
-            HashSet<int> bossFightIds, bool isBossSheet, Dictionary<int, string> shamanNamesById, string playerNameFilter)
+            HashSet<int> bossFightIds, bool isBossSheet, Dictionary<int, string> shamanNamesById, string playerNameFilter, Dictionary<int, List<string>> partyMembersByShamanId)
         {
             bool InScope(int fightId) => isBossSheet ? bossFightIds.Contains(fightId) : !bossFightIds.Contains(fightId);
 
             var results = allResults.Where(r => InScope(r.FightId)).ToList();
             var groupResults = allGroupResults.Where(g => InScope(g.FightId)).ToList();
-            return BuildStatSheetRows(raidCell, results, groupResults, shamanNamesById, playerNameFilter);
+            return BuildStatSheetRows(raidCell, results, groupResults, shamanNamesById, playerNameFilter, partyMembersByShamanId);
         }
 
         // "Individual Bosses" sheet: one stat block per distinct boss encountered (grouped by fight
@@ -1196,7 +1251,7 @@ namespace NaturesSwiftnessParse
         // outcome isn't tracked here, just recency. Blocks are ordered by that boss's first pull,
         // i.e. raid-night order.
         private static List<object[]> BuildIndividualBossesRows(string reportId, List<WindfuryFightResult> fightResults,
-            Dictionary<int, string> shamanNamesById, string playerNameFilter)
+            Dictionary<int, string> shamanNamesById, string playerNameFilter, Dictionary<int, List<string>> partyMembersByShamanId)
         {
             var rows = new List<object[]>();
 
@@ -1217,7 +1272,7 @@ namespace NaturesSwiftnessParse
                 string fightLink = $"https://vanilla.warcraftlogs.com/reports/{reportId}?fight={lastPullFightId}";
                 var fightCell = new XlsxFormula($"HYPERLINK(\"{fightLink}\",\"{bossName.Replace("\"", "\"\"")}\")", bossName);
 
-                rows.AddRange(BuildStatSheetRows(fightCell, results, groupResults, shamanNamesById, playerNameFilter));
+                rows.AddRange(BuildStatSheetRows(fightCell, results, groupResults, shamanNamesById, playerNameFilter, partyMembersByShamanId));
 
                 if (i < bossGroups.Count - 1)
                 {
@@ -1228,20 +1283,66 @@ namespace NaturesSwiftnessParse
             return rows;
         }
 
-        // Shared row-builder behind every stats block (Boss, Trash, and each boss's block on
-        // Individual Bosses): a
-        // header cell, column headers, one row per shaman already scoped to that sheet's fights by
-        // the caller, a blank spacer, then a trailing "All Shamans" rollup (mirroring the raid-wide
-        // bucket PrintSummary adds). shamanNamesById is always the full report-wide roster, not
-        // narrowed to this sheet's fights -- so every sheet lists the same shamans in the same order,
-        // even one who shows all zeros because they never twisted in that particular scope.
+        // "Individual Trash Fights" sheet: mirrors Individual Bosses' shape (one stat block per
+        // header cell, stacked with a blank spacer row between them), but one block per individual
+        // trash *fight* rather than grouped by name -- WCL labels every trash pull with the same
+        // generic name (typically just "Trash"), so grouping by name the way Individual Bosses does
+        // would collapse every trash pull in the raid into one block identical to the existing Trash
+        // tab, rather than showing them individually. The header cell links straight to that pull
+        // (fight id, since there's no "last pull of the same encounter" concept for trash -- each
+        // trash fight already IS one specific pull), labeled with the fight id appended since the
+        // name alone won't distinguish one trash block from the next. Blocks are ordered by fight id,
+        // i.e. raid-night order.
+        private static List<object[]> BuildIndividualTrashRows(string reportId, List<WindfuryFightResult> fightResults,
+            Dictionary<int, string> shamanNamesById, string playerNameFilter, Dictionary<int, List<string>> partyMembersByShamanId)
+        {
+            var rows = new List<object[]>();
+
+            var trashFights = fightResults.Where(f => !f.IsBossFight)
+                .OrderBy(f => f.FightId)
+                .ToList();
+
+            for (int i = 0; i < trashFights.Count; i++)
+            {
+                var fight = trashFights[i];
+
+                var results = fight.PlayerResults.Where(r => r.ShamanActorId.HasValue).ToList();
+                var groupResults = fight.GroupResults;
+
+                string fightLink = $"https://vanilla.warcraftlogs.com/reports/{reportId}?fight={fight.FightId}";
+                string label = $"{fight.FightName} (Fight {fight.FightId})";
+                var fightCell = new XlsxFormula($"HYPERLINK(\"{fightLink}\",\"{label.Replace("\"", "\"\"")}\")", label);
+
+                rows.AddRange(BuildStatSheetRows(fightCell, results, groupResults, shamanNamesById, playerNameFilter, partyMembersByShamanId));
+
+                if (i < trashFights.Count - 1)
+                {
+                    rows.Add(new object[0]); // spacing row before the next trash fight's block
+                }
+            }
+
+            return rows;
+        }
+
+        // Shared row-builder behind every stats block on every sheet (Boss, Trash, and each block on
+        // Individual Bosses/Individual Trash Fights): a header cell, column headers, one row per
+        // shaman already scoped to that sheet's fights by the caller, a blank spacer, then a trailing
+        // "All Shamans" rollup (mirroring the raid-wide bucket PrintSummary adds). shamanNamesById is
+        // always the full report-wide roster, not narrowed to this sheet's fights -- so every sheet
+        // lists the same shamans in the same order, even one who shows all zeros because they never
+        // twisted in that particular scope. "WF Recipients" (party membership -- any class, not just
+        // Windfury-eligible ones, see BuildPartyMembersByShaman) sits last, blank-separated from
+        // Twisted Fights, on every sheet -- since party membership is only ever inferred report-wide
+        // (no per-fight reshuffle detection exists to make it any more fight-specific anywhere else).
+        // Left blank on the "All Shamans" row since there's no single party to list for a combined
+        // rollup.
         private static List<object[]> BuildStatSheetRows(object headerCell, List<WindfuryPlayerFightResult> results, List<WindfuryGroupFightResult> groupResults,
-            Dictionary<int, string> shamanNamesById, string playerNameFilter)
+            Dictionary<int, string> shamanNamesById, string playerNameFilter, Dictionary<int, List<string>> partyMembersByShamanId)
         {
             var rows = new List<object[]>
             {
                 new object[] { headerCell },
-                new object[] { "Shaman Name", "", "Max WF Uptime", "WF Uptime", "", "Twisted Totem Seconds", "Twisted WF Loss", "Twist Efficiency", "Twisted Fights" }
+                new object[] { "Shaman Name", "", "Max WF Uptime", "WF Uptime", "", "Twisted Totem Seconds", "Twisted WF Loss", "Twist Efficiency", "Twisted Fights", "", "WF Recipients" }
             };
 
             int shamanRowCount = 0;
@@ -1252,17 +1353,33 @@ namespace NaturesSwiftnessParse
 
                 var shamanResults = results.Where(r => r.ShamanActorId.Value == shamanId).ToList();
                 var shamanGroupResults = groupResults.Where(g => g.ShamanActorId == shamanId).ToList();
-                rows.Add(BuildStatRow(shamanName, shamanResults, shamanGroupResults));
+                var row = BuildStatRow(shamanName, shamanResults, shamanGroupResults).ToList();
+                row.Add("");
+                row.Add(FormatRecipients(partyMembersByShamanId, shamanId));
+                rows.Add(row.ToArray());
                 shamanRowCount++;
             }
 
             if (playerNameFilter == null && shamanRowCount > 0)
             {
                 rows.Add(new object[0]); // spacer between the last shaman and the rollup below
-                rows.Add(BuildStatRow("All Shamans", results, groupResults));
+                var allShamansRow = BuildStatRow("All Shamans", results, groupResults).ToList();
+                allShamansRow.Add("");
+                allShamansRow.Add(""); // no single party to list for the combined rollup
+                rows.Add(allShamansRow.ToArray());
             }
 
             return rows;
+        }
+
+        // Comma-separated party roster for one shaman's "WF Recipients" cell -- "" (not "none") when
+        // there's simply no inferred party for them yet, same blank-cell treatment every other empty
+        // spot in these sheets gets.
+        private static string FormatRecipients(Dictionary<int, List<string>> partyMembersByShamanId, int shamanId)
+        {
+            return partyMembersByShamanId.TryGetValue(shamanId, out var members) && members.Count > 0
+                ? string.Join(", ", members)
+                : "";
         }
 
         // One data row (label + stat block), already scoped to a single sheet's fights by the caller
